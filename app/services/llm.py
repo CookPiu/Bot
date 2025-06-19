@@ -159,7 +159,7 @@ class LLMService:
     
     async def call_with_retry(self, prompt: str, system_prompt: str = "", 
                              preferred_model: str = None) -> str:
-        """带重试机制的LLM调用"""
+        """LLM调用（已移除重试机制）"""
         model_order = [preferred_model] if preferred_model else []
         model_order.extend([m for m in self.backends.keys() if m != preferred_model])
         
@@ -171,18 +171,16 @@ class LLMService:
                 
             backend = self.backends[model_name]
             
-            for attempt in range(settings.max_retry_attempts):
-                try:
-                    logger.info(f"Calling {model_name} (attempt {attempt + 1})")
-                    result = await backend.call(prompt, system_prompt)
-                    logger.info(f"Successfully called {model_name}")
-                    return result
-                    
-                except Exception as e:
-                    last_error = e
-                    logger.warning(f"Attempt {attempt + 1} failed for {model_name}: {str(e)}")
-                    if attempt < settings.max_retry_attempts - 1:
-                        await asyncio.sleep(2 ** attempt)  # 指数退避
+            try:
+                logger.info(f"Calling {model_name}")
+                result = await backend.call(prompt, system_prompt)
+                logger.info(f"Successfully called {model_name}")
+                return result
+                
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Failed to call {model_name}: {str(e)}")
+                # 继续尝试下一个模型，不重试当前模型
         
         raise Exception(f"All LLM backends failed. Last error: {str(last_error)}")
     
@@ -193,13 +191,21 @@ class LLMService:
             # 构建系统提示词
             system_prompt = """你是智能人才匹配助手。根据任务需求和候选人信息，分析匹配度并返回Top-3推荐。
 
-评分标准：
-1. 技能匹配度 (40%): 候选人技能与任务要求的匹配程度
-2. 可用时间 (25%): 候选人可用时间是否满足任务需求
-3. 历史表现 (25%): 候选人过往任务的完成质量
-4. 最近活跃度 (10%): 候选人最近的工作活跃程度
+候选人数据字段说明：
+- name: 候选人姓名
+- skill_tags: 技能标签列表（如：['go', 'python', 'java']）
+- score: 候选人评分（0-100）
+- performance: 历史表现评级（1-5）
+- experience: 工作经验（年数）
+- user_id: 候选人唯一标识
 
-请返回JSON格式，包含top-3的候选人ID和匹配分数(0-100)。"""
+评分标准：
+1. 技能匹配度 (40%): 候选人skill_tags与任务要求的匹配程度
+2. 综合能力 (30%): 基于score和performance的综合评估
+3. 经验匹配 (20%): experience是否满足任务复杂度要求
+4. 可用性 (10%): 候选人当前状态和可用性
+
+请返回JSON格式，包含top-3的候选人user_id和匹配分数(0-100)。"""
             
             # 构建用户提示词
             skill_tags = task_requirements.get('skill_tags', [])
@@ -218,8 +224,10 @@ class LLMService:
 候选人列表:
 {candidates_text}
 
+请仔细分析每个候选人的skill_tags字段与任务技能要求的匹配度，结合score、performance、experience等指标进行综合评估。
+
 请返回JSON数组格式的匹配结果，例如：
-[{{"user_id": "候选人ID", "match_score": 95, "reason": "匹配原因"}}]"""
+[{{"user_id": "候选人ID", "match_score": 95, "reason": "技能匹配度高，具备go和python技能，评分85分，经验丰富"}}]"""
             
             # 调用LLM
             response = await self.call_with_retry(

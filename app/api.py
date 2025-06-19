@@ -6,7 +6,6 @@ import logging
 from app.services.task_manager import task_manager, TaskStatus, TaskUrgency
 from app.bitable import FeishuBitableClient, bitable_client
 from app.services.feishu import FeishuService
-from app.services.task_manager import task_manager
 
 logger = logging.getLogger(__name__)
 
@@ -303,19 +302,16 @@ async def send_daily_reminders():
 
 @router.post("/admin/send-daily-report")
 async def send_daily_report_to_group():
-    """发送每日报告到群组"""
+    """生成每日报告（发送功能待实现）"""
     try:
         report = await task_manager.generate_daily_report()
         
-        # 发送报告到管理群组
-        await feishu.send_daily_report(
-            chat_id="your_management_chat_id",  # 需要配置管理群组ID
-            report_data=report
-        )
+        # 注意：send_daily_report 方法已被移除，如需发送功能请重新实现
+        logger.info(f"Daily report generated: {report}")
         
-        return {"message": "Daily report sent successfully"}
+        return {"message": "Daily report generated successfully", "report": report}
     except Exception as e:
-        logger.error(f"Error sending daily report: {str(e)}")
+        logger.error(f"Error generating daily report: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # 健康检查API

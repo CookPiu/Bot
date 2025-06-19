@@ -191,40 +191,84 @@ class FeishuService:
             logger.error(f"Error sending task notification: {str(e)}")
             return False
     
-    async def get_user_info(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """获取用户信息"""
-        # TODO: 实现真实的用户信息获取
-        raise NotImplementedError("get_user_info method needs to be implemented with real Lark SDK")
+    async def send_card_message(self, user_id: str = None, card: Dict[str, Any] = None, chat_id: str = None) -> bool:
+        """发送交互式卡片消息"""
+        try:
+            if not card:
+                logger.error("卡片内容不能为空")
+                return False
+            
+            # 确定接收者类型和ID
+            if chat_id:
+                receive_id_type = "chat_id"
+                receive_id = chat_id
+            elif user_id:
+                receive_id_type = "user_id"
+                receive_id = user_id
+            else:
+                logger.error("必须提供user_id或chat_id")
+                return False
+            
+            request = CreateMessageRequest.builder() \
+                .receive_id_type(receive_id_type) \
+                .request_body(CreateMessageRequestBody.builder()
+                    .receive_id(receive_id)
+                    .msg_type("interactive")
+                    .content(json.dumps(card, ensure_ascii=False))
+                    .build()) \
+                .build()
+            
+            response = self.client.im.v1.message.create(request)
+            
+            if response.success():
+                logger.info(f"交互式卡片发送成功到 {receive_id_type}: {receive_id}")
+                return True
+            else:
+                logger.error(f"发送交互式卡片失败: {response.code} - {response.msg}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"发送交互式卡片异常: {str(e)}")
+            return False
     
-    async def get_chat_members(self, chat_id: str) -> List[str]:
-        """获取群聊成员列表"""
-        # TODO: 实现真实的群聊成员获取
-        raise NotImplementedError("get_chat_members method needs to be implemented with real Lark SDK")
+    # 用户信息和群聊成员相关方法已移除，如需要请重新实现
     
     async def create_chat(self, name: str, members: List[str]) -> Optional[str]:
         """创建群聊"""
-        # TODO: 实现真实的群聊创建
-        raise NotImplementedError("create_chat method needs to be implemented with real Lark SDK")
+        try:
+            from lark_oapi.api.im.v1 import CreateChatRequest, CreateChatRequestBody
+            
+            # 构建群聊创建请求
+            request = CreateChatRequest.builder() \
+                .request_body(CreateChatRequestBody.builder()
+                    .name(name)
+                    .description(f"任务协作群 - {name}")
+                    .user_id_list(members)
+                    .chat_mode("group")
+                    .chat_type("private")
+                    .build()) \
+                .build()
+            
+            # 发送创建群聊请求
+            response = self.client.im.v1.chat.create(request)
+            
+            if response.success():
+                chat_id = response.data.chat_id
+                logger.info(f"群聊创建成功: {name}, chat_id: {chat_id}")
+                return chat_id
+            else:
+                logger.error(f"创建群聊失败: {response.code} - {response.msg}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"创建群聊异常: {str(e)}")
+            return None
     
-    async def send_approval_card(self, chat_id: str, task_data: Dict[str, Any], candidates: List[Dict[str, Any]]) -> bool:
-        """发送审批卡片"""
-        # TODO: 实现真实的审批卡片发送
-        raise NotImplementedError("send_approval_card method needs to be implemented with real Lark SDK")
-    
-    async def handle_card_action(self, action_data: Dict[str, Any]) -> bool:
-        """处理卡片交互动作"""
-        # TODO: 实现真实的卡片交互处理
-        raise NotImplementedError("handle_card_action method needs to be implemented with real Lark SDK")
-    
-    async def send_daily_report(self, chat_id: str, report_data: Dict[str, Any]) -> bool:
-        """发送日报"""
-        # TODO: 实现真实的日报发送
-        raise NotImplementedError("send_daily_report method needs to be implemented with real Lark SDK")
-    
-    async def get_message_history(self, chat_id: str, limit: int = 50) -> List[Dict[str, Any]]:
-        """获取消息历史"""
-        # TODO: 实现真实的消息历史获取
-        raise NotImplementedError("get_message_history method needs to be implemented with real Lark SDK")
+    # 以下方法已移除，如需要请重新实现：
+    # - send_approval_card: 发送审批卡片
+    # - handle_card_action: 处理卡片交互动作  
+    # - send_daily_report: 发送日报
+    # - get_message_history: 获取消息历史
 
 # 创建全局实例
 feishu_service = FeishuService()

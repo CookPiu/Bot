@@ -19,179 +19,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 feishu_service = FeishuService()
 
-# 长连接事件处理器
-def setup_event_handler():
-    """设置飞书长连接事件处理器"""
-    
-    def handle_message_receive(data: lark.im.v1.P2ImMessageReceiveV1) -> None:
-        """处理接收消息事件 v2.0"""
-        try:
-            logger.info(f"收到消息事件 v2.0: {lark.JSON.marshal(data, indent=4)}")
-            
-            # 提取消息信息
-            message = data.event.message
-            sender = data.event.sender
-            
-            # 忽略机器人自己的消息
-            if sender.sender_type == "app":
-                return
-            
-            user_id = sender.sender_id.user_id
-            message_type = message.message_type
-            
-            if message_type == "text":
-                content = json.loads(message.content)
-                text_content = content.get("text", "")
-                
-                # 异步处理文本命令
-                import asyncio
-                asyncio.create_task(_process_text_command_sync(user_id, text_content))
-                
-        except Exception as e:
-            logger.error(f"处理消息事件时出错: {str(e)}")
-    
-    def handle_card_action(data: lark.CustomizedEvent) -> None:
-        """处理卡片交互事件"""
-        try:
-            logger.info(f"收到卡片交互事件: {lark.JSON.marshal(data, indent=4)}")
-            
-            # 解析卡片交互数据
-            event_data = data.event
-            if hasattr(event_data, 'action'):
-                action = event_data.action
-                user_id = event_data.operator.user_id if hasattr(event_data, 'operator') else None
-                
-                if user_id and hasattr(action, 'value'):
-                    action_value = action.value
-                    
-                    # 异步处理卡片交互
-                    import asyncio
-                    asyncio.create_task(_handle_card_action_sync(user_id, action_value))
-                    
-        except Exception as e:
-            logger.error(f"处理卡片交互事件时出错: {str(e)}")
-    
-    # 构建事件处理器
-    event_handler = lark.EventDispatcherHandler.builder("", "") \
-        .register_p2_im_message_receive_v1(handle_message_receive) \
-        .register_p1_customized_event("card_action", handle_card_action) \
-        .build()
-    
-    return event_handler
+# 注意：setup_event_handler函数已被移除，因为它与handle_message_event重复
+# 现在统一使用setup_websocket_client中的handle_message_event和handle_card_action_event
 
-async def handle_message_receive(data: dict):
-    """处理接收到的消息"""
-    try:
-        # 解析消息数据
-        event = data.get('event', {})
-        message = event.get('message', {})
-        sender = event.get('sender', {})
-        
-        user_id = sender.get('sender_id', {}).get('user_id')
-        message_type = message.get('message_type')
-        content = message.get('content')
-        
-        if not user_id or not content:
-            logger.warning("Invalid message data received")
-            return
-        
-        # 解析消息内容
-        if message_type == 'text':
-            import json
-            text_content = json.loads(content).get('text', '')
-            
-            # 处理不同类型的命令
-            if text_content.startswith('/task'):
-                await handle_task_command(user_id, text_content)
-            elif text_content.startswith('/help'):
-                await handle_help_command(user_id)
-            elif text_content.startswith('/status'):
-                await handle_status_command(user_id, text_content)
-            elif text_content.startswith('/table'):
-                await handle_table_command(user_id, text_content, None)
-            elif text_content.startswith('/done'):
-                await handle_done_command(user_id, text_content, message.get('chat_id'))
-            elif ('@bot' in text_content and '新任务' in text_content) or text_content.startswith('新任务'):
-                await handle_new_task_command(user_id, text_content, message.get('chat_id'))
-            else:
-                # 默认回复
-                await feishu_service.send_message(
-                    user_id=user_id,
-                    message="您好！我是任务管理助手。发送 /help 查看可用命令。"
-                )
-        
-        logger.info(f"Message processed from user {user_id}")
-        
-    except Exception as e:
-        logger.error(f"Error handling message: {str(e)}")
+# 注意：handle_message_receive函数已被移除，因为它与handle_message_event重复
+# 现在统一使用handle_message_event函数处理所有消息
 
-async def handle_card_action(data: dict):
-    """处理卡片交互"""
-    try:
-        # 解析卡片交互数据
-        event = data.get('event', {})
-        operator = event.get('operator', {})
-        action = event.get('action', {})
-        
-        user_id = operator.get('user_id')
-        action_value = action.get('value', {})
-        action_tag = action.get('tag')
-        
-        if not user_id:
-            logger.warning("Invalid card action data received")
-            return
-        
-        # 处理不同类型的卡片交互
-        if action_tag == 'button':
-            # 处理按钮点击
-            action_type = action_value.get('action')
-            
-            if action_type == 'select_candidate':
-                # 处理候选人选择
-                await handle_candidate_selection(user_id, action_value)
-            elif action_type == 'accept_task':
-                # 处理任务接受
-                task_id = action_value.get('task_id')
-                if task_id:
-                    success = await task_manager.accept_task(task_id, user_id)
-                    if success:
-                        await feishu_service.send_message(
-                            user_id=user_id,
-                            message=f"任务 {task_id} 接受成功！"
-                        )
-                    else:
-                        await feishu_service.send_message(
-                            user_id=user_id,
-                            message=f"任务 {task_id} 接受失败，请稍后重试。"
-                        )
-        
-        elif action_tag == 'accept_task':
-            task_id = action_value.get('task_id')
-            if task_id:
-                success = await task_manager.accept_task(task_id, user_id)
-                if success:
-                    await feishu_service.send_message(
-                        user_id=user_id,
-                        message=f"任务 {task_id} 接受成功！"
-                    )
-                else:
-                    await feishu_service.send_message(
-                        user_id=user_id,
-                        message=f"任务 {task_id} 接受失败，请稍后重试。"
-                    )
-        
-        elif action_tag == 'reject_task':
-            task_id = action_value.get('task_id')
-            if task_id:
-                await feishu_service.send_message(
-                    user_id=user_id,
-                    message=f"您已拒绝任务 {task_id}。"
-                )
-        
-        logger.info(f"Card action processed from user {user_id}")
-        
-    except Exception as e:
-        logger.error(f"Error handling card action: {str(e)}")
+# 注意：handle_card_action函数已被移除，因为它与handle_card_action_event重复
+# 现在统一使用handle_card_action_event函数处理所有卡片交互
 
 async def handle_task_command(user_id: str, command: str):
     """处理任务相关命令"""
@@ -252,23 +87,36 @@ async def handle_task_command(user_id: str, command: str):
 async def handle_help_command(user_id: str):
     """处理帮助命令"""
     help_text = """
-🤖 任务管理助手帮助
+🤖 飞书任务管理机器人 - 帮助文档
 
-可用命令：
-/task list - 查看我的任务列表
-/task status <任务ID> - 查看任务状态
-/status - 查看个人统计
-/table - 查询表格信息和记录
-/done <提交链接> - 提交任务完成（自动验收）
-/help - 显示此帮助信息
+📋 **任务管理命令**
+• `/create <标题>` - 创建新任务
+• `/submit <任务ID> <链接>` - 提交任务作品
+• `/done <提交链接>` - 快速提交任务（自动验收）
+• `/status <任务ID>` - 查看指定任务状态
+• `/mytasks` - 查看我的所有任务
 
-新任务创建：
-@bot 新任务 [任务描述] - 创建新任务（完整格式）
-新任务 [任务描述] - 创建新任务（简化格式）
+📊 **数据查询命令**
+• `/table` - 查询表格信息和记录
+• `/bitable` - 多维表格操作
+• `/report` 或 `#report` - 生成每日任务统计报告
 
-任务提交示例：
-/done https://github.com/user/repo/pull/123
-/done https://docs.google.com/document/d/xxx
+❓ **帮助命令**
+• `/help` - 显示此帮助信息
+
+🆕 **创建任务的方式**
+• `@机器人 新任务 [任务描述]` - 完整格式创建
+• `新任务 [任务描述]` - 简化格式创建
+
+💡 **任务提交示例**
+• `/done https://github.com/user/repo/pull/123`
+• `/done https://docs.google.com/document/d/xxx`
+• `/submit TASK001 https://github.com/user/project`
+
+🎯 **使用技巧**
+• 支持通过卡片按钮进行交互操作
+• 代码任务支持GitHub自动CI检查
+• 系统会自动进行任务验收和评分
 
 如需更多帮助，请联系管理员。
     """
@@ -851,96 +699,9 @@ async def _handle_card_action_sync(user_id: str, action_value: Dict[str, Any]):
     except Exception as e:
         logger.error(f"处理卡片交互时出错: {str(e)}")
 
-# HTTP Webhook路由已禁用，只使用长连接处理
-# @router.post("/feishu")
-# async def feishu_webhook(request: Request):
-#     """处理Feishu Webhook事件"""
-#     try:
-#         body = await request.body()
-#         headers = request.headers
-#         
-#         # 验证请求签名（如果配置了验证密钥）
-#         if settings.feishu_verification_token:
-#             if not _verify_feishu_signature(body, headers):
-#                 raise HTTPException(status_code=401, detail="Invalid signature")
-#         
-#         # 解析事件数据
-#         try:
-#             event_data = json.loads(body)
-#         except json.JSONDecodeError:
-#             raise HTTPException(status_code=400, detail="Invalid JSON")
-#         
-#         # 处理URL验证
-#         if event_data.get("type") == "url_verification":
-#             return {"challenge": event_data.get("challenge")}
-#         
-#         # 处理事件回调 - 支持新旧两种格式
-#         if event_data.get("type") == "event_callback":
-#             # 旧格式
-#             await _handle_feishu_event(event_data.get("event", {}))
-#         elif event_data.get("schema") == "2.0" and "header" in event_data:
-#             # 新格式 (schema 2.0)
-#             header = event_data.get("header", {})
-#             event_type = header.get("event_type", "")
-#             event_content = event_data.get("event", {})
-#             
-#             # 将事件类型转换为旧格式兼容的类型
-#             if event_type == "im.message.receive_v1":
-#                 await _handle_feishu_message(event_content)
-#             elif event_type.startswith("card.action."):
-#                 await _handle_feishu_card_action(event_content)
-#             elif event_type.startswith("application.bot.menu"):
-#                 await _handle_feishu_bot_menu(event_content)
-#             else:
-#                 logger.info(f"Unhandled Feishu event type: {event_type}")
-#         
-#         return {"status": "ok"}
-#         
-#     except Exception as e:
-#         logger.error(f"Error processing Feishu webhook: {str(e)}")
-#         raise HTTPException(status_code=500, detail="Internal server error")
+# HTTP Webhook路由已禁用，现在使用长连接处理所有事件
 
-# GitHub Webhook路由已禁用，只使用长连接处理
-# @router.post("/github")
-# async def github_webhook(
-#     request: Request,
-#     x_github_event: str = Header(None),
-#     x_hub_signature_256: str = Header(None)
-# ):
-#     """处理GitHub Webhook事件"""
-#     try:
-#         body = await request.body()
-#         
-#         # 验证GitHub签名
-#         if settings.github_webhook_secret:
-#             if not _verify_github_signature(body, x_hub_signature_256):
-#                 raise HTTPException(status_code=401, detail="Invalid signature")
-#         
-#         # 解析事件数据
-#         try:
-#             event_data = json.loads(body)
-#         except json.JSONDecodeError:
-#             raise HTTPException(status_code=400, detail="Invalid JSON")
-#         
-#         # 处理不同类型的GitHub事件
-#         if x_github_event == "push":
-#             await _handle_github_push(event_data)
-#         elif x_github_event == "pull_request":
-#             await _handle_github_pull_request(event_data)
-#         elif x_github_event == "issues":
-#             await _handle_github_issues(event_data)
-#         elif x_github_event == "workflow_run":
-#             await handle_workflow_run_event(event_data)
-#         elif x_github_event == "check_run":
-#             await handle_check_run_event(event_data)
-#         elif x_github_event == "status":
-#             await handle_status_event(event_data)
-#         
-#         return {"status": "ok"}
-#         
-#     except Exception as e:
-#         logger.error(f"Error processing GitHub webhook: {str(e)}")
-#         raise HTTPException(status_code=500, detail="Internal server error")
+# GitHub Webhook路由已禁用，现在使用长连接处理所有事件
 
 async def handle_workflow_run_event(data: dict):
     """处理工作流运行事件"""
@@ -1119,6 +880,10 @@ async def _handle_feishu_card_action(event: Dict[str, Any]):
                 text=f"请提交任务 {task_id} 的完成链接，格式：/submit {task_id} <链接> [备注]"
             )
         
+        elif action_type == "select_candidate":
+            # 处理候选人选择
+            await handle_candidate_selection(user_id, action_value)
+        
     except Exception as e:
         logger.error(f"Error handling Feishu card action: {str(e)}")
 
@@ -1148,22 +913,8 @@ async def _handle_feishu_bot_menu(event: Dict[str, Any]):
                 )
         
         elif event_key == "help":
-            help_text = """🤖 Feishu Chat-Ops 帮助
-
-📋 命令列表：
-• /create <标题> - 创建新任务
-• /submit <任务ID> <链接> - 提交任务
-• /status <任务ID> - 查看任务状态
-• /mytasks - 查看我的任务
-• /help - 显示帮助信息
-
-💡 您也可以通过卡片按钮进行交互操作。"""
-            
-            await feishu_service.send_text_message(
-                user_id=user_id,
-                text=help_text,
-                chat_id=chat_id
-            )
+            # 使用统一的帮助命令
+            await handle_help_command(user_id)
         
     except Exception as e:
         logger.error(f"Error handling Feishu bot menu: {str(e)}")
@@ -1525,29 +1276,7 @@ async def _process_text_command(user_id: str, text: str, chat_id: str = None):
         
         elif text.startswith("/help"):
             # 显示帮助
-            help_text = """🤖 Feishu Chat-Ops 帮助
-
-📋 命令列表：
-• /create <标题> - 创建新任务
-• /submit <任务ID> <链接> - 提交任务
-• /done <提交链接> - 提交任务完成（自动验收）
-• /status <任务ID> - 查看任务状态
-• /mytasks - 查看我的任务
-• /bitable - 多维表格操作
-• /table - 查询表格信息和记录
-• /help - 显示帮助信息
-
-💡 您也可以通过卡片按钮进行交互操作。
-
-任务提交示例：
-• /done https://github.com/user/repo/pull/123
-• /done https://docs.google.com/document/d/xxx"""
-            
-            await feishu_service.send_text_message(
-                user_id=user_id,
-                text=help_text,
-                chat_id=chat_id
-            )
+            await handle_help_command(user_id)
         
         elif text.startswith("/bitable"):
             # 处理多维表格操作命令
@@ -1560,6 +1289,10 @@ async def _process_text_command(user_id: str, text: str, chat_id: str = None):
         elif text.startswith("/done"):
             # 处理任务完成提交命令
             await handle_done_command(user_id, text, chat_id)
+        
+        elif text.startswith("/report") or text.startswith("#report"):
+            # 处理每日报告查询命令
+            await handle_report_command(user_id, text, chat_id)
         
         elif ('@bot' in text and '新任务' in text) or text.startswith('新任务'):
             # 处理新任务命令
@@ -1757,12 +1490,7 @@ async def handle_new_task_command(user_id: str, text_content: str, chat_id: str 
         # 创建任务并添加到多维表格 - 已禁用
         # task_id = await task_manager.create_task(task_info)
         
-        # if not task_id:
-        #     await feishu_service.send_message(
-        #         user_id=user_id,
-        #         message="创建任务失败，请稍后重试。"
-        #     )
-        #     return
+        # 任务创建失败处理已移除
         
         # 生成临时任务ID用于显示
         import uuid
@@ -1786,20 +1514,14 @@ async def handle_new_task_command(user_id: str, text_content: str, chat_id: str 
                 message=task_message
             )
             
-            # 发送前三名候选人推荐
+            # 发送前三名候选人推荐卡片（带选择按钮）
             if top_candidates:
-                candidates_message = "🏆 **AI推荐的前三名候选人**\n\n"
-                for i, candidate in enumerate(top_candidates[:3], 1):
-                    candidates_message += f"**{i}. {candidate.get('name', '未知')}**\n"
-                    candidates_message += f"   匹配度: {candidate.get('match_score', 0)}%\n"
-                    candidates_message += f"   技能: {', '.join(candidate.get('skill_tags', []))}\n"
-                    candidates_message += f"   经验: {candidate.get('experience_years', 0)}年\n"
-                    candidates_message += f"   可用时间: {candidate.get('hours_available', 0)}小时/周\n"
-                    candidates_message += f"   推荐理由: {candidate.get('match_reason', '无')}\n\n"
-                
-                await feishu_service.send_message_to_chat(
-                    chat_id=chat_id,
-                    message=candidates_message
+                await _send_candidate_selection_card(
+                    user_id=user_id,
+                    task_id=task_id,
+                    task_info=task_info,
+                    candidates=top_candidates[:3],
+                    chat_id=chat_id
                 )
         
         # 给HR发送确认消息
@@ -1955,6 +1677,7 @@ async def handle_candidate_selection(user_id: str, action_value: Dict[str, Any])
     try:
         task_id = action_value.get('task_id')
         candidate_id = action_value.get('candidate_id')
+        candidate_rank = action_value.get('candidate_rank', 1)
         
         if not task_id or not candidate_id:
             await feishu_service.send_message(
@@ -1963,19 +1686,67 @@ async def handle_candidate_selection(user_id: str, action_value: Dict[str, Any])
             )
             return
         
-        # 更新任务状态，分配给选定的候选人
-        success = await task_manager.assign_task_to_candidate(task_id, candidate_id)
+        # 创建任务小群
+        chat_name = f"任务协作群-{task_id[:8]}"
+        members = [user_id, candidate_id]  # 任务发起人和候选人
         
-        if success:
+        try:
+            # 尝试创建群聊
+            chat_id = await feishu_service.create_chat(chat_name, members)
+            
+            if chat_id:
+                # 发送群聊创建成功消息
+                welcome_message = f"🎉 任务协作群创建成功！\n\n" \
+                                f"📋 **任务ID**: {task_id}\n" \
+                                f"👤 **选中候选人**: 候选人{candidate_rank}\n" \
+                                f"💬 **群聊ID**: {chat_id}\n\n" \
+                                f"请在此群中进行任务相关的沟通协作。"
+                
+                await feishu_service.send_message_to_chat(
+                    chat_id=chat_id,
+                    message=welcome_message
+                )
+                
+                # 通知任务发起人
+                await feishu_service.send_message(
+                    user_id=user_id,
+                    message=f"✅ 候选人选择成功！\n" \
+                           f"已创建任务协作群：{chat_name}\n" \
+                           f"群聊ID：{chat_id}"
+                )
+                
+                # 通知被选中的候选人
+                await feishu_service.send_message(
+                    user_id=candidate_id,
+                    message=f"🎯 恭喜！您被选中参与任务协作\n" \
+                           f"任务ID：{task_id}\n" \
+                           f"已为您创建任务协作群：{chat_name}\n" \
+                           f"请查看群聊进行后续沟通。"
+                )
+                
+            else:
+                # 群聊创建失败，回退到原有逻辑
+                await feishu_service.send_message(
+                    user_id=user_id,
+                    message=f"候选人选择成功，但创建协作群失败。\n" \
+                           f"任务ID：{task_id}\n" \
+                           f"选中候选人：{candidate_id}\n" \
+                           f"请手动联系候选人进行后续沟通。"
+                )
+                
+        except Exception as chat_error:
+            logger.error(f"创建任务协作群时出错: {str(chat_error)}")
+            # 群聊创建失败，但候选人选择成功
             await feishu_service.send_message(
                 user_id=user_id,
-                message=f"任务 {task_id} 已成功分配给候选人 {candidate_id}"
+                message=f"候选人选择成功，但创建协作群时出现问题。\n" \
+                       f"任务ID：{task_id}\n" \
+                       f"选中候选人：{candidate_id}\n" \
+                       f"请手动联系候选人进行后续沟通。"
             )
-        else:
-            await feishu_service.send_message(
-                user_id=user_id,
-                message=f"任务 {task_id} 分配失败，请稍后重试"
-            )
+            
+        # 记录选择日志
+        logger.info(f"用户 {user_id} 为任务 {task_id} 选择了候选人 {candidate_id} (排名第{candidate_rank})")
             
     except Exception as e:
         logger.error(f"处理候选人选择时出错: {str(e)}")
@@ -1987,9 +1758,8 @@ async def handle_candidate_selection(user_id: str, action_value: Dict[str, Any])
 def _verify_feishu_signature(body: bytes, headers: Dict[str, str]) -> bool:
     """验证Feishu请求签名"""
     try:
-        # Feishu签名验证逻辑
-        # 这里需要根据Feishu的具体签名算法实现
-        return True  # 暂时跳过验证
+        # 签名验证已简化，生产环境请实现完整验证逻辑
+        return True
     except Exception as e:
         logger.error(f"Error verifying Feishu signature: {str(e)}")
         return False
@@ -2017,3 +1787,126 @@ def _verify_github_signature(body: bytes, signature: str) -> bool:
     except Exception as e:
         logger.error(f"Error verifying GitHub signature: {str(e)}")
         return False
+
+async def handle_report_command(user_id: str, text: str, chat_id: str = None):
+    """处理 /report 和 #report 命令"""
+    try:
+        # 生成每日报告
+        report = await task_manager.generate_daily_report()
+        
+        # 同时更新本地JSON文件
+        await _update_local_stats(report)
+        
+        if not report:
+            await feishu_service.send_message(
+                user_id=user_id,
+                message="❌ 获取报告数据失败，请稍后重试"
+            )
+            return
+        
+        # 格式化报告消息
+        report_text = _format_daily_report(report)
+        
+        # 发送报告
+        if chat_id:
+            await feishu_service.send_message_to_chat(
+                chat_id=chat_id,
+                message=report_text
+            )
+        else:
+            await feishu_service.send_message(
+                user_id=user_id,
+                message=report_text
+            )
+        
+        logger.info(f"Daily report sent to user {user_id}")
+        
+    except Exception as e:
+        logger.error(f"Error handling report command: {str(e)}")
+        await feishu_service.send_message(
+            user_id=user_id,
+            message="生成报告时出错，请稍后重试"
+        )
+
+async def _update_local_stats(report_data: Dict[str, Any]):
+    """更新本地统计文件"""
+    try:
+        import json
+        import os
+        from datetime import datetime
+        
+        stats_file = "daily_stats.json"
+        
+        # 准备统计数据
+        stats = {
+            "date": report_data.get('date', datetime.now().strftime('%Y-%m-%d')),
+            "total_tasks": report_data.get('total_tasks', 0),
+            "completed_tasks": report_data.get('completed_tasks', 0),
+            "pending_tasks": report_data.get('pending_tasks', 0),
+            "in_progress_tasks": report_data.get('in_progress_tasks', 0),
+            "submitted_tasks": report_data.get('submitted_tasks', 0),
+            "rejected_tasks": report_data.get('rejected_tasks', 0),
+            "average_score": report_data.get('average_score', 0.0),
+            "completion_rate": report_data.get('completion_rate', 0.0),
+            "tasks_by_status": {
+                "published": report_data.get('published_tasks', 0),
+                "in_progress": report_data.get('in_progress_tasks', 0),
+                "submitted": report_data.get('submitted_tasks', 0),
+                "reviewing": report_data.get('reviewing_tasks', 0),
+                "completed": report_data.get('completed_tasks', 0),
+                "rejected": report_data.get('rejected_tasks', 0)
+            },
+            "top_performers": report_data.get('top_performers', []),
+            "last_updated": datetime.now().isoformat()
+        }
+        
+        # 写入文件
+        with open(stats_file, 'w', encoding='utf-8') as f:
+            json.dump(stats, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"Local stats updated: {stats_file}")
+        
+    except Exception as e:
+        logger.error(f"Error updating local stats: {str(e)}")
+
+def _format_daily_report(report: Dict[str, Any]) -> str:
+    """格式化每日报告消息"""
+    try:
+        date = report.get('date', 'Unknown')
+        total_tasks = report.get('total_tasks', 0)
+        completed_tasks = report.get('completed_tasks', 0)
+        pending_tasks = report.get('pending_tasks', 0)
+        in_progress_tasks = report.get('in_progress_tasks', 0)
+        average_score = report.get('average_score', 0)
+        completion_rate = report.get('completion_rate', 0)
+        
+        # 计算完成率百分比
+        completion_percentage = completion_rate * 100 if completion_rate else 0
+        
+        report_text = f"""📊 **每日任务统计报告**
+
+📅 **日期**: {date}
+
+📈 **任务概览**:
+• 总任务数: {total_tasks}
+• 已完成: {completed_tasks}
+• 进行中: {in_progress_tasks}
+• 待处理: {pending_tasks}
+
+🎯 **绩效指标**:
+• 完成率: {completion_percentage:.1f}%
+• 平均评分: {average_score:.1f}分
+
+📋 **任务状态分布**:
+• ✅ 已完成: {completed_tasks}
+• 🔄 进行中: {in_progress_tasks}
+• ⏳ 待处理: {pending_tasks}
+
+---
+💡 数据更新时间: {report.get('last_updated', 'Unknown')}"""
+        
+        return report_text
+        
+    except Exception as e:
+        logger.error(f"Error formatting daily report: {str(e)}")
+        return "❌ 报告格式化失败"

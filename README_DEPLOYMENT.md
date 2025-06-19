@@ -1,35 +1,103 @@
 # Feishu Chat-Ops 多维表格部署指南
 
-## 项目概述
+## 飞书智能任务管理系统 - 部署指南
 
-本项目是一个基于飞书多维表格的任务管理系统，实现了自动化的任务分配、进度跟踪和质量评估功能。系统通过飞书机器人与用户交互，使用多维表格存储任务和人员信息，并集成了GitHub CI/CD流程。
+## 📋 项目概述
 
-## 核心功能
+本项目是一个基于飞书多维表格的智能任务管理系统，实现了自动化的任务分配、进度跟踪和质量评估功能。系统采用现代化的微服务架构，通过飞书机器人与用户交互，使用多维表格存储任务和人员信息，并集成了多种AI模型和GitHub CI/CD流程。
 
-### 1. 多维表格集成
-- **任务表格**：存储任务信息、状态、分配情况
-- **人员表格**：管理候选人信息、技能标签、绩效数据
-- **自动化操作**：创建、更新、查询表格记录
+## 🏗️ 系统架构
 
-### 2. 智能任务分配
-- 基于技能匹配的候选人推荐
-- LLM驱动的智能评分系统
-- 自动发送任务邀请通知
+### 技术栈
+- **后端**: FastAPI (Python 3.9+)
+- **数据存储**: 飞书多维表格 (Bitable)
+- **AI集成**: DeepSeek、OpenAI、Google Gemini
+- **消息平台**: 飞书开放平台 API
+- **容器化**: Docker + Docker Compose
+- **反向代理**: Nginx
+- **缓存**: Redis
 
-### 3. 质量管控
-- 自动化代码审查
-- CI/CD状态监控
-- 智能评分和反馈
+### 服务组件
+- **主应用服务**: FastAPI应用，处理业务逻辑
+- **Nginx**: 反向代理和负载均衡
+- **Redis**: 缓存和会话管理
+- **飞书机器人**: 消息接收和推送
+- **Webhook服务**: GitHub集成和事件处理
 
-### 4. 飞书集成
-- 消息推送和交互
-- 卡片式任务操作界面
-- 命令行式任务管理
+## 🔧 核心功能
 
-## 部署步骤
+### 1. 智能任务管理
+- **任务生命周期**: 8种状态的完整流转管理
+- **智能分配**: 基于技能匹配和AI评估的候选人推荐
+- **进度跟踪**: 实时状态更新和自动通知
+- **质量控制**: 集成CI/CD和AI评分系统
 
-### 1. 环境准备
+### 2. 飞书生态集成
+- **多维表格**: 任务和人员数据的结构化存储
+- **机器人交互**: 支持文本命令和卡片交互
+- **消息推送**: 实时任务通知和状态更新
+- **长连接**: WebSocket实时消息接收
 
+### 3. AI智能化
+- **多模型支持**: DeepSeek、OpenAI、Gemini
+- **智能评分**: 自动代码质量评估
+- **候选人匹配**: 基于技能和历史表现的推荐
+- **自然语言处理**: 任务描述和需求分析
+
+### 4. DevOps集成
+- **GitHub Webhooks**: 自动监控代码提交
+- **CI/CD状态**: 实时构建和部署状态跟踪
+- **自动化验收**: 基于CI结果的任务验收
+- **质量门禁**: 代码质量和测试覆盖率检查
+
+## 🚀 部署步骤
+
+### 方式一：Docker Compose 部署（推荐）
+
+#### 1. 环境准备
+```bash
+# 克隆项目
+git clone <repository-url>
+cd Bot
+
+# 确保Docker和Docker Compose已安装
+docker --version
+docker-compose --version
+```
+
+#### 2. 配置环境变量
+```bash
+# 复制环境变量模板
+cp .env.example .env
+
+# 编辑环境变量文件
+vim .env  # 或使用其他编辑器
+```
+
+#### 3. 一键部署
+```bash
+# 构建并启动所有服务
+docker-compose up -d
+
+# 查看服务状态
+docker-compose ps
+
+# 查看日志
+docker-compose logs -f
+```
+
+#### 4. 验证部署
+```bash
+# 检查健康状态
+curl http://localhost:8000/health
+
+# 访问API文档
+open http://localhost:8000/docs
+```
+
+### 方式二：本地开发部署
+
+#### 1. 环境准备
 ```bash
 # 克隆项目
 git clone <repository-url>
@@ -44,155 +112,391 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-### 2. 飞书应用配置
-
-#### 2.1 创建飞书应用
-1. 访问 [飞书开放平台](https://open.feishu.cn/)
-2. 创建企业自建应用
-3. 获取 App ID 和 App Secret
-
-#### 2.2 配置应用权限
-在应用管理页面添加以下权限：
-- `im:message` - 发送消息
-- `im:message.group_at_msg` - 群组@消息
-- `im:message.p2p_msg` - 私聊消息
-- `bitable:app` - 多维表格应用权限
-- `contact:user.id` - 获取用户ID
-
-#### 2.3 配置事件订阅
-1. 在「事件订阅」页面配置回调地址：`https://your-domain.com/webhook/feishu`
-2. 订阅以下事件：
-   - `im.message.receive_v1` - 接收消息
-   - `application.bot.menu_v6` - 机器人菜单
-
-### 3. 多维表格设置
-
-#### 3.1 创建多维表格应用
-1. 在飞书中创建多维表格
-2. 创建两个数据表：
-
-**任务表 (Task Table)**
-```
-字段名称          字段类型        说明
-task_id          单行文本        任务唯一标识
-title            单行文本        任务标题
-description      多行文本        任务描述
-status           单选           状态(pending/assigned/in_progress/submitted/reviewing/completed/rejected)
-skill_tags       多选           技能标签
-deadline         日期           截止时间
-urgency          单选           紧急程度(low/normal/high/urgent)
-assignee         单行文本        负责人用户ID
-created_by       单行文本        创建者用户ID
-created_at       日期时间        创建时间
-accepted_at      日期时间        接受时间
-submitted_at     日期时间        提交时间
-completed_at     日期时间        完成时间
-submission_url   单行文本        提交链接
-submission_note  多行文本        提交说明
-final_score      数字           最终评分
-reward_points    数字           奖励积分
-acceptance_criteria 多行文本     验收标准
-estimated_hours  数字           预估工时
-```
-
-**人员表 (Person Table)**
-```
-字段名称              字段类型        说明
-user_id              单行文本        用户唯一标识
-name                 单行文本        姓名
-skill_tags           多选           技能标签
-performance_score    数字           绩效评分
-completed_tasks      数字           完成任务数
-total_score          数字           总评分
-reward_points        数字           总积分
-hours_available      数字           可用工时/周
-last_active          日期时间        最后活跃时间
-availability         复选框          是否可用
-```
-
-#### 3.2 获取表格信息
-1. 获取多维表格的 App Token
-2. 获取任务表和人员表的 Table ID
-
-### 4. 环境变量配置
-
-创建 `.env` 文件：
-
-```env
-# 飞书配置
-FEISHU_APP_ID=cli_xxxxxxxxxx
-FEISHU_APP_SECRET=xxxxxxxxxx
-FEISHU_VERIFICATION_TOKEN=xxxxxxxxxx
-FEISHU_ENCRYPT_KEY=xxxxxxxxxx
-
-# 多维表格配置
-FEISHU_BITABLE_APP_TOKEN=xxxxxxxxxx
-FEISHU_TASK_TABLE_ID=xxxxxxxxxx
-FEISHU_PERSON_TABLE_ID=xxxxxxxxxx
-
-# LLM配置 (选择一个)
-# DeepSeek
-DEEPSEEK_API_KEY=sk-xxxxxxxxxx
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-
-# OpenAI
-OPENAI_API_KEY=sk-xxxxxxxxxx
-OPENAI_BASE_URL=https://api.openai.com/v1
-
-# GitHub配置 (可选)
-GITHUB_WEBHOOK_SECRET=xxxxxxxxxx
-
-# 服务器配置
-SERVER_HOST=0.0.0.0
-SERVER_PORT=8000
-SERVER_RELOAD=false
-
-# 系统配置
-MAX_RETRY_ATTEMPTS=3
-MIN_PASS_SCORE=70
-LLM_TIMEOUT=30
-LOG_LEVEL=INFO
-```
-
-### 5. 启动服务
-
-#### 5.1 开发环境
+#### 2. 配置环境变量
 ```bash
-# 直接启动
+cp .env.example .env
+# 编辑 .env 文件，填入必要的配置
+```
+
+#### 3. 启动服务
+```bash
+# 启动主应用
 python main.py
 
 # 或使用uvicorn
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-#### 5.2 生产环境
-```bash
-# 使用Docker
-docker build -t feishu-chatops .
-docker run -d -p 8000:8000 --env-file .env feishu-chatops
+## ⚙️ 飞书应用配置
 
-# 或使用docker-compose
-docker-compose up -d
+### 1. 创建飞书应用
+1. 访问 [飞书开放平台](https://open.feishu.cn/)
+2. 创建企业自建应用
+3. 获取 App ID 和 App Secret
+
+### 2. 配置应用权限
+#### 必需权限：
+- `im:message` - 发送消息
+- `im:message.group_at_msg` - 接收群聊@消息
+- `im:message.group_at_msg:readonly` - 读取群聊@消息
+- `im:message.p2p_msg` - 接收私聊消息
+- `im:message.p2p_msg:readonly` - 读取私聊消息
+- `bitable:app` - 多维表格应用权限
+- `contact:user.id:readonly` - 读取用户ID
+
+### 3. 配置事件订阅
+#### 事件类型：
+- `im.message.receive_v1` - 接收消息事件
+- `im.message.message_read_v1` - 消息已读事件
+- `application.bot.menu_v6` - 机器人菜单事件
+
+#### 请求地址：
+```
+https://your-domain.com/webhooks/feishu
 ```
 
-### 6. 配置反向代理
+### 4. 配置机器人
+1. 启用机器人功能
+2. 设置机器人名称和头像
+3. 配置机器人描述和帮助信息
+4. 添加到相关群组
+5. 配置机器人菜单（可选）
 
-使用Nginx配置HTTPS和域名：
+## 📊 多维表格配置
 
+### 1. 创建多维表格应用
+1. 在飞书中创建新的多维表格
+2. 获取多维表格的 App Token
+3. 创建以下两个数据表
+
+### 2. 任务表结构 (Task Table)
+| 字段名称 | 字段类型 | 必填 | 说明 |
+|---------|---------|------|------|
+| task_id | 单行文本 | ✓ | 任务唯一标识 |
+| title | 单行文本 | ✓ | 任务标题 |
+| description | 多行文本 | ✓ | 任务详细描述 |
+| status | 单选 | ✓ | 任务状态 |
+| skill_tags | 多选 | ✓ | 所需技能标签 |
+| deadline | 日期时间 | ✓ | 截止时间 |
+| urgency | 单选 | ✓ | 紧急程度 |
+| assignee | 单行文本 | - | 负责人用户ID |
+| created_by | 单行文本 | ✓ | 创建者用户ID |
+| created_at | 日期时间 | ✓ | 创建时间 |
+| accepted_at | 日期时间 | - | 接受时间 |
+| submitted_at | 日期时间 | - | 提交时间 |
+| completed_at | 日期时间 | - | 完成时间 |
+| submission_url | 单行文本 | - | 提交链接 |
+| submission_note | 多行文本 | - | 提交说明 |
+| final_score | 数字 | - | 最终评分(0-100) |
+| reward_points | 数字 | ✓ | 奖励积分 |
+| acceptance_criteria | 多行文本 | - | 验收标准 |
+| estimated_hours | 数字 | ✓ | 预估工时 |
+
+#### 状态选项配置：
+- `pending` - 待分配
+- `assigned` - 已分配
+- `in_progress` - 进行中
+- `submitted` - 已提交
+- `reviewing` - 审核中
+- `completed` - 已完成
+- `rejected` - 已拒绝
+- `cancelled` - 已取消
+
+#### 紧急程度选项：
+- `low` - 低
+- `normal` - 普通
+- `high` - 高
+- `urgent` - 紧急
+
+### 3. 候选人表结构 (Candidate Table)
+| 字段名称 | 字段类型 | 必填 | 说明 |
+|---------|---------|------|------|
+| user_id | 单行文本 | ✓ | 用户唯一标识 |
+| name | 单行文本 | ✓ | 姓名 |
+| skill_tags | 多选 | ✓ | 技能标签 |
+| performance_score | 数字 | - | 绩效评分(0-100) |
+| completed_tasks | 数字 | - | 完成任务数 |
+| total_score | 数字 | - | 总评分 |
+| reward_points | 数字 | - | 总积分 |
+| hours_available | 数字 | ✓ | 可用工时/周 |
+| last_active | 日期时间 | - | 最后活跃时间 |
+| availability | 复选框 | ✓ | 是否可用 |
+| contact_info | 单行文本 | - | 联系方式 |
+| department | 单行文本 | - | 部门 |
+| level | 单选 | - | 技能等级 |
+
+#### 技能等级选项：
+- `junior` - 初级
+- `intermediate` - 中级
+- `senior` - 高级
+- `expert` - 专家
+
+### 4. 获取表格信息
+1. 在多维表格中点击右上角「...」→「高级」→「获取App Token」
+2. 复制App Token
+3. 获取每个表的Table ID（在表格URL中或通过API获取）
+
+## ⚙️ 环境变量配置
+
+### 1. 创建配置文件
+在项目根目录创建 `.env` 文件：
+
+```env
+# ===========================================
+# 飞书应用配置 (必填)
+# ===========================================
+FEISHU_APP_ID=cli_xxxxxxxxxx              # 飞书应用ID
+FEISHU_APP_SECRET=xxxxxxxxxx               # 飞书应用密钥
+FEISHU_VERIFICATION_TOKEN=xxxxxxxxxx       # 事件订阅验证Token
+FEISHU_ENCRYPT_KEY=xxxxxxxxxx              # 事件订阅加密Key
+
+# ===========================================
+# 多维表格配置 (必填)
+# ===========================================
+BITABLE_APP_TOKEN=xxxxxxxxxx               # 多维表格App Token
+TASK_TABLE_ID=xxxxxxxxxx                   # 任务表ID
+CANDIDATE_TABLE_ID=xxxxxxxxxx              # 候选人表ID
+
+# ===========================================
+# AI模型配置 (必填)
+# ===========================================
+LLM_BACKEND=deepseek                       # LLM后端类型: deepseek/openai/gemini
+
+# DeepSeek配置
+DEEPSEEK_API_KEY=sk-xxxxxxxxxx             # DeepSeek API密钥
+DEEPSEEK_BASE_URL=https://api.deepseek.com # DeepSeek API地址
+DEEPSEEK_MODEL=deepseek-chat                # 使用的模型名称
+
+# OpenAI配置 (可选)
+# OPENAI_API_KEY=sk-xxxxxxxxxx
+# OPENAI_BASE_URL=https://api.openai.com/v1
+# OPENAI_MODEL=gpt-3.5-turbo
+
+# Google Gemini配置 (可选)
+# GEMINI_API_KEY=xxxxxxxxxx
+# GEMINI_MODEL=gemini-pro
+
+# ===========================================
+# GitHub集成配置 (可选)
+# ===========================================
+GITHUB_TOKEN=ghp_xxxxxxxxxx                # GitHub Personal Access Token
+GITHUB_WEBHOOK_SECRET=xxxxxxxxxx           # GitHub Webhook密钥
+GITHUB_ENABLE_CI=true                       # 是否启用GitHub CI集成
+
+# ===========================================
+# 服务器配置
+# ===========================================
+SERVER_HOST=0.0.0.0                        # 服务器监听地址
+SERVER_PORT=8000                            # 服务器端口
+DEBUG=false                                 # 调试模式
+LOG_LEVEL=INFO                              # 日志级别: DEBUG/INFO/WARNING/ERROR
+
+# ===========================================
+# 缓存配置 (可选)
+# ===========================================
+REDIS_URL=redis://localhost:6379           # Redis连接URL
+REDIS_ENABLE=false                          # 是否启用Redis缓存
+
+# ===========================================
+# 安全配置
+# ===========================================
+JWT_SECRET_KEY=your-super-secret-key        # JWT密钥
+ALLOWED_HOSTS=localhost,127.0.0.1           # 允许的主机列表
+CORS_ORIGINS=*                              # CORS允许的源
+
+# ===========================================
+# 业务配置
+# ===========================================
+TASK_AUTO_ASSIGN=true                       # 是否启用任务自动分配
+TASK_DEADLINE_HOURS=72                      # 默认任务截止时间(小时)
+SCORE_THRESHOLD=60                          # 任务通过评分阈值
+MAX_RETRY_ATTEMPTS=3                        # 最大重试次数
+```
+
+### 2. 配置说明
+
+#### 必填配置项
+- **飞书配置**: 从飞书开发者后台获取
+- **多维表格配置**: 从多维表格应用中获取
+- **AI模型配置**: 至少配置一个LLM后端
+
+#### 可选配置项
+- **GitHub集成**: 用于CI/CD集成和代码质量检查
+- **Redis缓存**: 提升系统性能，推荐生产环境启用
+- **安全配置**: 生产环境建议修改默认值
+
+#### 环境特定配置
+```bash
+# 开发环境
+DEBUG=true
+LOG_LEVEL=DEBUG
+SERVER_HOST=127.0.0.1
+
+# 生产环境
+DEBUG=false
+LOG_LEVEL=INFO
+SERVER_HOST=0.0.0.0
+```
+
+## 🚀 部署启动
+
+### 1. 本地开发环境
+
+#### 安装依赖
+```bash
+# 克隆项目
+git clone <repository-url>
+cd Bot
+
+# 创建虚拟环境
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# 或
+venv\Scripts\activate     # Windows
+
+# 安装依赖
+pip install -r requirements.txt
+```
+
+#### 启动服务
+```bash
+# 开发模式启动
+python main.py
+
+# 或使用 uvicorn
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### 2. Docker 部署
+
+#### 单容器部署
+```bash
+# 构建镜像
+docker build -t feishu-chatops .
+
+# 运行容器
+docker run -d \
+  --name feishu-chatops \
+  -p 8000:8000 \
+  --env-file .env \
+  feishu-chatops
+```
+
+#### Docker Compose 部署（推荐）
+```bash
+# 启动所有服务
+docker-compose up -d
+
+# 查看服务状态
+docker-compose ps
+
+# 查看日志
+docker-compose logs -f app
+
+# 停止服务
+docker-compose down
+```
+
+### 3. 生产环境配置
+
+#### 系统要求
+- **CPU**: 2核心以上
+- **内存**: 4GB以上
+- **存储**: 20GB以上
+- **网络**: 稳定的互联网连接
+- **操作系统**: Linux (推荐 Ubuntu 20.04+)
+
+#### 性能优化
+```bash
+# 使用 Gunicorn 启动（生产环境推荐）
+gunicorn main:app \
+  --workers 4 \
+  --worker-class uvicorn.workers.UvicornWorker \
+  --bind 0.0.0.0:8000 \
+  --access-logfile - \
+  --error-logfile -
+```
+
+## 🔧 反向代理配置
+
+### Nginx 配置
+
+#### 基础配置
 ```nginx
 server {
-    listen 443 ssl;
+    listen 80;
     server_name your-domain.com;
     
+    # 重定向到 HTTPS
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name your-domain.com;
+    
+    # SSL 证书配置
     ssl_certificate /path/to/cert.pem;
     ssl_certificate_key /path/to/key.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384;
     
+    # 安全头
+    add_header X-Frame-Options DENY;
+    add_header X-Content-Type-Options nosniff;
+    add_header X-XSS-Protection "1; mode=block";
+    
+    # 代理配置
     location / {
         proxy_pass http://localhost:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # WebSocket 支持
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        
+        # 超时配置
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+    
+    # 健康检查端点
+    location /health {
+        proxy_pass http://localhost:8000/health;
+        access_log off;
+    }
+    
+    # 静态文件缓存
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+}
+```
+
+#### 负载均衡配置
+```nginx
+upstream feishu_backend {
+    server 127.0.0.1:8000;
+    server 127.0.0.1:8001;
+    server 127.0.0.1:8002;
+    
+    # 健康检查
+    keepalive 32;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name your-domain.com;
+    
+    location / {
+        proxy_pass http://feishu_backend;
+        # ... 其他配置
     }
 }
 ```

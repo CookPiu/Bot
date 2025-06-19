@@ -41,6 +41,100 @@ class FeishuBitableClient:
             return result['tenant_access_token']
         else:
             raise Exception(f"Failed to get access token: {result}")
+    
+    def get_daily_task_stats(self):
+        """获取每日任务统计数据
+        
+        Returns:
+            包含任务统计信息的字典
+        """
+        try:
+            # 获取默认表格中的所有记录
+            logger.info(f"正在获取表格 {self.table_id} 的记录...")
+            result = self.get_table_records(self.table_id)
+            records = result.get('data', {}).get('items', [])
+            logger.info(f"获取到 {len(records)} 条记录")
+            
+            # 打印前几条记录的字段信息用于调试
+            if records:
+                for i, record in enumerate(records[:3]):
+                    fields = record.get('fields', {})
+                    logger.info(f"记录 {i+1} 字段: {list(fields.keys())}")
+                    logger.info(f"记录 {i+1} 内容: {fields}")
+            
+            # 初始化统计数据
+            stats = {
+                'total_tasks': 0,
+                'completed_tasks': 0,
+                'pending_tasks': 0,
+                'in_progress_tasks': 0,
+                'average_score': 0,
+                'completion_rate': 0,
+                'top_performers': []
+            }
+            
+            if not records:
+                logger.warning("没有找到任何记录")
+                return stats
+            
+            total_score = 0
+            score_count = 0
+            performers = []
+            
+            # 遍历记录统计任务数据
+            for record in records:
+                fields = record.get('fields', {})
+                
+                # 统计总任务数
+                stats['total_tasks'] += 1
+                
+                # 根据状态字段统计（需要根据实际字段名调整）
+                status = fields.get('状态', fields.get('status', ''))
+                if status == '已完成' or status == 'completed':
+                    stats['completed_tasks'] += 1
+                elif status == '进行中' or status == 'in_progress':
+                    stats['in_progress_tasks'] += 1
+                elif status == '待处理' or status == 'pending':
+                    stats['pending_tasks'] += 1
+                
+                # 统计分数（需要根据实际字段名调整）
+                score = fields.get('分数', fields.get('score', 0))
+                if isinstance(score, (int, float)) and score > 0:
+                    total_score += score
+                    score_count += 1
+                
+                # 收集表现者信息
+                name = fields.get('姓名', fields.get('name', fields.get('用户', '')))
+                if name and score > 0:
+                    performers.append({'name': name, 'score': score})
+            
+            # 计算平均分
+            if score_count > 0:
+                stats['average_score'] = round(total_score / score_count, 2)
+            
+            # 计算完成率
+            if stats['total_tasks'] > 0:
+                stats['completion_rate'] = round(stats['completed_tasks'] / stats['total_tasks'] * 100, 2)
+            
+            # 获取前3名表现者
+            if performers:
+                performers.sort(key=lambda x: x['score'], reverse=True)
+                stats['top_performers'] = performers[:3]
+            
+            logger.info(f"生成统计数据: {stats}")
+            return stats
+            
+        except Exception as e:
+            logger.error(f"获取每日任务统计出错: {str(e)}")
+            return {
+                'total_tasks': 0,
+                'completed_tasks': 0,
+                'pending_tasks': 0,
+                'in_progress_tasks': 0,
+                'average_score': 0,
+                'completion_rate': 0,
+                'top_performers': []
+            }
 
     def _make_request(self, method, endpoint, params=None, data=None):
         """发送请求到飞书API
@@ -568,11 +662,11 @@ class BitableClient:
                     # 构建候选人详情
                     return {
                         'name': fields.get('name', 'Unknown'),
-                        'skill_tags': fields.get('skill_tags', '').split(',') if fields.get('skill_tags') else [],
-                        'completed_tasks': fields.get('completed_tasks', 0),
-                        'average_score': fields.get('average_score', 0),
-                        'total_points': fields.get('total_points', 0),
-                        'hours_available': fields.get('hours_available', 0)
+                        'skill_tags': fields.get('skilltags', '').split(',') if fields.get('skilltags') else [],
+                        'completed_tasks': fields.get('performance', 0),
+                        'average_score': fields.get('score', 0),
+                        'total_points': fields.get('score', 0),
+                        'hours_available': fields.get('experience', 0)
                     }
             
             # 如果没有找到匹配的记录，返回None
@@ -600,13 +694,13 @@ class BitableClient:
                 candidate = {
                     'record_id': record.get('record_id'),
                     'name': fields.get('name', 'Unknown'),
-                    'skill_tags': fields.get('skill_tags', '').split(',') if fields.get('skill_tags') else [],
-                    'experience_years': fields.get('experience_years', 0),
-                    'hours_available': fields.get('hours_available', 0),
-                    'average_score': fields.get('average_score', 0),
-                    'completed_tasks': fields.get('completed_tasks', 0),
-                    'total_points': fields.get('total_points', 0),
-                    'user_id': fields.get('user_id') or fields.get('feishu_id'),
+                    'skill_tags': fields.get('skilltags', '').split(',') if fields.get('skilltags') else [],
+                    'experience_years': fields.get('experience', 0),
+                    'hours_available': fields.get('experience', 0),
+                    'average_score': fields.get('score', 0),
+                    'completed_tasks': fields.get('performance', 0),
+                    'total_points': fields.get('score', 0),
+                    'user_id': fields.get('userid', '') or fields.get('feishu_id', ''),
                     'status': fields.get('status', 'available')
                 }
                 
@@ -620,3 +714,100 @@ class BitableClient:
         except Exception as e:
             logger.error(f"获取所有候选人信息出错: {str(e)}")
             return []
+    
+    def get_daily_task_stats(self):
+        """获取每日任务统计数据
+        
+        Returns:
+            包含任务统计信息的字典
+        """
+        try:
+            # 获取默认表格中的所有记录
+            logger.info(f"正在获取表格 {self.client.table_id} 的记录...")
+            result = self.client.get_table_records(self.client.table_id)
+            records = result.get('data', {}).get('items', [])
+            logger.info(f"获取到 {len(records)} 条记录")
+            
+            # 打印前几条记录的字段信息用于调试
+            if records:
+                for i, record in enumerate(records[:3]):
+                    fields = record.get('fields', {})
+                    logger.info(f"记录 {i+1} 字段: {list(fields.keys())}")
+                    logger.info(f"记录 {i+1} 内容: {fields}")
+            
+            # 初始化统计数据
+            stats = {
+                'total_tasks': 0,
+                'completed_tasks': 0,
+                'pending_tasks': 0,
+                'in_progress_tasks': 0,
+                'average_score': 0,
+                'completion_rate': 0,
+                'top_performers': []
+            }
+            
+            if not records:
+                logger.warning("没有找到任何记录")
+                return stats
+            
+            total_score = 0
+            score_count = 0
+            performers = []
+            
+            # 统计任务数据
+            for record in records:
+                fields = record.get('fields', {})
+                status = fields.get('status', '').lower()
+                score = fields.get('score', 0)
+                name = fields.get('name', '')
+                
+                stats['total_tasks'] += 1
+                
+                # 根据状态分类统计
+                if status in ['completed', '已完成', 'done']:
+                    stats['completed_tasks'] += 1
+                elif status in ['pending', '待处理', 'waiting']:
+                    stats['pending_tasks'] += 1
+                elif status in ['in_progress', '进行中', 'processing']:
+                    stats['in_progress_tasks'] += 1
+                
+                # 统计分数
+                if score and isinstance(score, (int, float)) and score > 0:
+                    total_score += score
+                    score_count += 1
+                    
+                    if name:
+                        performers.append({
+                            'name': name,
+                            'score': score
+                        })
+            
+            # 计算平均分数
+            if score_count > 0:
+                stats['average_score'] = round(total_score / score_count, 2)
+            
+            # 计算完成率
+            if stats['total_tasks'] > 0:
+                stats['completion_rate'] = round(
+                    (stats['completed_tasks'] / stats['total_tasks']) * 100, 2
+                )
+            
+            # 获取前3名表现者
+            if performers:
+                performers.sort(key=lambda x: x['score'], reverse=True)
+                stats['top_performers'] = performers[:3]
+            
+            logger.info(f"生成每日任务统计: {stats}")
+            return stats
+            
+        except Exception as e:
+            logger.error(f"获取每日任务统计出错: {str(e)}")
+            return {
+                'total_tasks': 0,
+                'completed_tasks': 0,
+                'pending_tasks': 0,
+                'in_progress_tasks': 0,
+                'average_score': 0,
+                'completion_rate': 0,
+                'top_performers': []
+            }

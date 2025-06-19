@@ -1,0 +1,21 @@
+{
+  "date": "2025-06-19",
+  "total_tasks": 0,
+  "completed_tasks": 0,
+  "pending_tasks": 0,
+  "in_progress_tasks": 0,
+  "submitted_tasks": 0,
+  "rejected_tasks": 0,
+  "average_score": 0,
+  "completion_rate": 0,
+  "tasks_by_status": {
+    "published": 0,
+    "in_progress": 0,
+    "submitted": 0,
+    "reviewing": 0,
+    "completed": 0,
+    "rejected": 0
+  },
+  "top_performers": [],
+  "last_updated": "2025-06-19T12:24:26.650608"
+}

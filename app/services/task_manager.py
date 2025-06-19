@@ -9,7 +9,6 @@ from app.bitable import FeishuBitableClient, bitable_client
 from app.services.feishu import FeishuService
 from app.services.llm import llm_service
 from app.services.match import MatchService
-from app import config as settings
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +183,9 @@ class TaskManager:
                 'submitted_at': datetime.now().isoformat()
             })
             
+            # 更新本地统计
+            await self._update_daily_stats()
+            
             # 自动质量检查
             await self._auto_quality_check(task_id, task, submission_url)
             
@@ -245,6 +247,9 @@ class TaskManager:
                 'review_result': 'passed'
             })
             
+            # 更新本地统计
+            await self._update_daily_stats()
+            
             # 更新候选人表现
             if assignee:
                 await self.bitable.update_candidate_performance(
@@ -286,6 +291,9 @@ class TaskManager:
                 'review_result': 'failed',
                 'failed_reasons': failed_reasons
             })
+            
+            # 更新本地统计
+            await self._update_daily_stats()
             
             # 发送拒绝通知
             feedback = "任务需要修改，请根据以下建议进行调整：\n" + "\n".join(failed_reasons)
@@ -334,7 +342,7 @@ class TaskManager:
     async def generate_daily_report(self) -> Dict[str, Any]:
         """生成每日报告"""
         try:
-            stats = await self.bitable.get_daily_task_stats()
+            stats = self.bitable.get_daily_task_stats()
             
             report = {
                 'date': datetime.now().strftime('%Y-%m-%d'),
@@ -351,6 +359,49 @@ class TaskManager:
         except Exception as e:
             logger.error(f"Error generating daily report: {str(e)}")
             return {}
+    
+    async def _update_daily_stats(self):
+        """更新本地每日统计"""
+        try:
+            import json
+            from datetime import datetime
+            
+            # 生成当前统计
+            report = await self.generate_daily_report()
+            
+            stats_file = "daily_stats.json"
+            
+            # 准备统计数据
+            stats = {
+                "date": report.get('date', datetime.now().strftime('%Y-%m-%d')),
+                "total_tasks": report.get('total_tasks', 0),
+                "completed_tasks": report.get('completed_tasks', 0),
+                "pending_tasks": report.get('pending_tasks', 0),
+                "in_progress_tasks": report.get('in_progress_tasks', 0),
+                "submitted_tasks": report.get('submitted_tasks', 0),
+                "rejected_tasks": report.get('rejected_tasks', 0),
+                "average_score": report.get('average_score', 0.0),
+                "completion_rate": report.get('completion_rate', 0.0),
+                "tasks_by_status": {
+                    "published": report.get('published_tasks', 0),
+                    "in_progress": report.get('in_progress_tasks', 0),
+                    "submitted": report.get('submitted_tasks', 0),
+                    "reviewing": report.get('reviewing_tasks', 0),
+                    "completed": report.get('completed_tasks', 0),
+                    "rejected": report.get('rejected_tasks', 0)
+                },
+                "top_performers": report.get('top_performers', []),
+                "last_updated": datetime.now().isoformat()
+            }
+            
+            # 写入文件
+            with open(stats_file, 'w', encoding='utf-8') as f:
+                json.dump(stats, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"Daily stats updated: {stats_file}")
+            
+        except Exception as e:
+            logger.error(f"Error updating daily stats: {str(e)}")
     
     async def complete_task(self, task_id: str, review_data: Dict[str, Any]) -> bool:
         """完成任务（公共接口）"""
