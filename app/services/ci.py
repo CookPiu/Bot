@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from app.services.llm import llm_service
 from app.bitable import bitable_client
+from app.field_mapping import get_field_value
 
 logger = logging.getLogger(__name__)
 
@@ -170,12 +171,12 @@ class CIService:
                 return
             
             fields = task_data.get("fields", {})
-            submission_url = fields.get("提交链接", "")
+            submission_url = get_field_value(fields, "submission_url", "task", "")
             
             # 调用LLM进行评分
             score, reasons = await self.evaluate_submission(
-                description=fields.get("任务描述", ""),
-                acceptance_criteria=fields.get("验收标准", ""),
+                description=get_field_value(fields, "description", "task", ""),
+                acceptance_criteria=get_field_value(fields, "acceptance_criteria", "task", ""),
                 submission_url=submission_url
             )
             

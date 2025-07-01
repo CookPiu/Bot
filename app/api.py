@@ -50,10 +50,10 @@ class CandidateResponse(BaseModel):
     user_id: str
     name: str
     skill_tags: List[str]
-    performance: float
-    completed_tasks: int
-    hours_available: int
-    last_active: str
+    job_level: str
+    experience: int
+    total_tasks: int
+    average_score: float
 
 class DailyReportResponse(BaseModel):
     """每日报告响应模型"""
@@ -211,10 +211,10 @@ async def get_candidates():
                 user_id=candidate.get('user_id', ''),
                 name=candidate.get('name', ''),
                 skill_tags=candidate.get('skill_tags', []),
-                performance=candidate.get('performance', 0.0),
-                completed_tasks=candidate.get('completed_tasks', 0),
-                hours_available=candidate.get('hours_available', 0),
-                last_active=candidate.get('last_active', '')
+                job_level=candidate.get('job_level', ''),
+                experience=candidate.get('experience', 0),
+                total_tasks=candidate.get('total_tasks', 0),
+                average_score=candidate.get('average_score', 0.0)
             )
             for candidate in candidates
         ]
@@ -237,10 +237,10 @@ async def get_candidate(user_id: str):
             user_id=candidate.get('user_id', ''),
             name=candidate.get('name', ''),
             skill_tags=candidate.get('skill_tags', []),
-            performance=candidate.get('performance', 0.0),
-            completed_tasks=candidate.get('completed_tasks', 0),
-            hours_available=candidate.get('hours_available', 0),
-            last_active=candidate.get('last_active', '')
+            job_level=candidate.get('job_level', ''),
+            experience=candidate.get('experience', 0),
+            total_tasks=candidate.get('total_tasks', 0),
+            average_score=candidate.get('average_score', 0.0)
         )
     except HTTPException:
         raise

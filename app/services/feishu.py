@@ -26,7 +26,7 @@ class FeishuService:
         if not self.app_id or not self.app_secret:
             raise ValueError("Feishu app_id and app_secret are required")
         
-        # 使用真实的飞书SDK
+        # 使用真实的飞书SDK，设置默认user_id_type
         self.client = lark.Client.builder() \
             .app_id(self.app_id) \
             .app_secret(self.app_secret) \
@@ -236,32 +236,92 @@ class FeishuService:
     async def create_chat(self, name: str, members: List[str]) -> Optional[str]:
         """创建群聊"""
         try:
-            from lark_oapi.api.im.v1 import CreateChatRequest, CreateChatRequestBody
+            import httpx
             
-            # 构建群聊创建请求
-            request = CreateChatRequest.builder() \
-                .request_body(CreateChatRequestBody.builder()
-                    .name(name)
-                    .description(f"任务协作群 - {name}")
-                    .user_id_list(members)
-                    .chat_mode("group")
-                    .chat_type("private")
-                    .build()) \
-                .build()
+            logger.info(f"开始创建群聊: {name}，成员: {members}")
             
-            # 发送创建群聊请求
-            response = self.client.im.v1.chat.create(request)
-            
-            if response.success():
-                chat_id = response.data.chat_id
-                logger.info(f"群聊创建成功: {name}, chat_id: {chat_id}")
-                return chat_id
-            else:
-                logger.error(f"创建群聊失败: {response.code} - {response.msg}")
+            # 获取访问令牌
+            access_token = await self._get_access_token()
+            if not access_token:
+                logger.error("无法获取访问令牌")
                 return None
+            
+            # 构建请求体
+            payload = {
+                "name": name,
+                "description": f"任务协作群 - {name}",
+                "user_id_list": members,
+                "chat_mode": "group",
+                "chat_type": "private"
+            }
+            
+            # 构建请求头
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json; charset=utf-8"
+            }
+            
+            # 构建URL，明确设置user_id_type查询参数
+            url = "https://open.feishu.cn/open-apis/im/v1/chats?user_id_type=user_id"
+            
+            # 发送HTTP请求
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, headers=headers, json=payload)
+                
+                logger.info(f"群聊创建API调用: {url}")
+                logger.info(f"请求体: {payload}")
+                logger.info(f"响应状态: {response.status_code}")
+                logger.info(f"响应内容: {response.text}")
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('code') == 0:
+                        chat_id = result['data']['chat_id']
+                        logger.info(f"群聊创建成功: {name}, chat_id: {chat_id}")
+                        return chat_id
+                    else:
+                        logger.error(f"群聊创建失败: {result.get('code')} - {result.get('msg')}")
+                        return None
+                else:
+                    logger.error(f"HTTP请求失败: {response.status_code} - {response.text}")
+                    return None
                 
         except Exception as e:
             logger.error(f"创建群聊异常: {str(e)}")
+            return None
+    
+    async def _get_access_token(self) -> Optional[str]:
+        """获取访问令牌"""
+        try:
+            import httpx
+            
+            url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+            
+            payload = {
+                "app_id": self.app_id,
+                "app_secret": self.app_secret
+            }
+            
+            headers = {
+                "Content-Type": "application/json; charset=utf-8"
+            }
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, headers=headers, json=payload)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('code') == 0:
+                        return result['tenant_access_token']
+                    else:
+                        logger.error(f"获取访问令牌失败: {result.get('msg')}")
+                        return None
+                else:
+                    logger.error(f"获取访问令牌HTTP请求失败: {response.status_code}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"获取访问令牌异常: {str(e)}")
             return None
     
     # 以下方法已移除，如需要请重新实现：

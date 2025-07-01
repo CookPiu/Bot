@@ -9,6 +9,7 @@ import uvicorn
 from app.config import settings
 from app.api import router as api_router
 from app.webhooks import router as webhook_router, setup_websocket_client
+from app.router.github_hook import router as github_webhook_router
 from app.services.task_manager import task_manager
 
 # 配置日志
@@ -64,14 +65,36 @@ async def lifespan(app: FastAPI):
     # 启动飞书长连接客户端（所有模式下都启动）
     websocket_task = asyncio.create_task(feishu_websocket_task())
     
+    # 启动任务监测服务
+    try:
+        from app.services.task_monitor import task_monitor
+        monitor_task = asyncio.create_task(task_monitor.start_monitoring())
+        logger.info("Task monitoring service started")
+    except Exception as e:
+        logger.error(f"Failed to start task monitoring: {str(e)}")
+        monitor_task = None
+    
     try:
         yield
     finally:
         # 关闭时执行
         logger.info("Application shutting down...")
+        
+        # 停止任务监测
+        if monitor_task:
+            try:
+                from app.services.task_monitor import task_monitor
+                await task_monitor.stop_monitoring()
+                monitor_task.cancel()
+            except Exception as e:
+                logger.error(f"Error stopping task monitor: {str(e)}")
+        
+        # 停止其他后台任务
         background_task.cancel()
         if websocket_task:
             websocket_task.cancel()
+            
+        # 等待任务取消
         try:
             await background_task
         except asyncio.CancelledError:
@@ -79,6 +102,11 @@ async def lifespan(app: FastAPI):
         if websocket_task:
             try:
                 await websocket_task
+            except asyncio.CancelledError:
+                pass
+        if monitor_task:
+            try:
+                await monitor_task
             except asyncio.CancelledError:
                 pass
 
@@ -111,6 +139,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # 注册路由
 app.include_router(api_router)
 app.include_router(webhook_router)
+app.include_router(github_webhook_router)
 
 # 静态文件服务（如果需要前端界面）
 try:

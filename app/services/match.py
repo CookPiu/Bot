@@ -80,7 +80,6 @@ class MatchService:
 - 技能要求：{', '.join(task_data.get('skill_tags', []))}
 - 截止时间：{task_data.get('deadline', '')}
 - 紧急程度：{task_data.get('urgency', 'normal')}
-- 预估工时：{task_data.get('estimated_hours', 8)}小时
 """
         
         candidates_info = "候选人列表：\n"
@@ -89,11 +88,10 @@ class MatchService:
 {i}. 候选人ID: {candidate.get('user_id', '')}
    姓名: {candidate.get('name', '')}
    技能标签: {', '.join(candidate.get('skill_tags', []))}
-   可用工时: {candidate.get('hours_available', 0)}小时
-   绩效评分: {candidate.get('performance', 0)}
-   最后完成时间: {candidate.get('last_done_at', '无')}
+   职级: {candidate.get('job_level', '')}
+   经验年数: {candidate.get('experience', 0)}
    总任务数: {candidate.get('total_tasks', 0)}
-   完成任务数: {candidate.get('completed_tasks', 0)}
+   平均评分: {candidate.get('average_score', 0)}
 """
         
         return f"""
@@ -159,19 +157,18 @@ class MatchService:
                 else:
                     skill_match = 1.0
                 
-                # 计算绩效分数
-                performance = candidate.get("performance", 0) / 100.0
+                # 计算平均评分分数 (0-100 -> 0-1)
+                avg_score = candidate.get("average_score", 0) / 100.0
                 
-                # 计算可用性分数
-                hours_available = candidate.get("hours_available", 0)
-                estimated_hours = task_data.get("estimated_hours", 8)
-                availability = min(hours_available / max(estimated_hours, 1), 1.0)
+                # 计算经验分数 (年数转换为评分)
+                experience_years = candidate.get("experience", 0)
+                experience_score = min(experience_years / 5.0, 1.0)  # 5年经验为满分
                 
                 # 综合评分
-                match_score = int((skill_match * 0.4 + performance * 0.4 + availability * 0.2) * 100)
+                match_score = int((skill_match * 0.4 + avg_score * 0.4 + experience_score * 0.2) * 100)
                 
                 candidate["match_score"] = match_score
-                candidate["match_reason"] = f"技能匹配度: {skill_match:.1%}, 绩效: {performance:.1%}, 可用性: {availability:.1%}"
+                candidate["match_reason"] = f"技能匹配度: {skill_match:.1%}, 平均评分: {avg_score:.1%}, 经验: {experience_score:.1%}"
             
             return candidates
             
@@ -191,31 +188,18 @@ class MatchService:
             else:
                 skill_match = 1.0
             
-            # 绩效分数 (30%)
-            performance = candidate.get("performance", 0) / 100.0
+            # 平均评分 (40%)
+            avg_score = candidate.get("average_score", 0) / 100.0
             
-            # 可用性 (20%)
-            hours_available = candidate.get("hours_available", 0)
-            estimated_hours = task_data.get("estimated_hours", 8)
-            availability = min(hours_available / max(estimated_hours, 1), 1.0)
-            
-            # 最近活跃度 (10%)
-            last_done = candidate.get("last_done_at", "")
-            if last_done:
-                try:
-                    last_date = datetime.fromisoformat(last_done.replace("Z", "+00:00"))
-                    days_since = (datetime.now() - last_date).days
-                    activity = max(0, 1 - days_since / 30)  # 30天内活跃度递减
-                except:
-                    activity = 0.5
-            else:
-                activity = 0.5
+            # 经验匹配度 (20%)
+            experience_years = candidate.get("experience", 0)
+            experience_score = min(experience_years / 5.0, 1.0)  # 5年经验为满分
             
             # 综合评分
-            total_score = int((skill_match * 0.4 + performance * 0.3 + availability * 0.2 + activity * 0.1) * 100)
+            total_score = int((skill_match * 0.4 + avg_score * 0.4 + experience_score * 0.2) * 100)
             
             # 生成匹配理由
-            reason = f"技能匹配: {skill_match:.1%}, 绩效: {performance:.1%}, 可用性: {availability:.1%}, 活跃度: {activity:.1%}"
+            reason = f"技能匹配: {skill_match:.1%}, 平均评分: {avg_score:.1%}, 经验: {experience_score:.1%}"
             
             return total_score, reason
             

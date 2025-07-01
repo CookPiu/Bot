@@ -46,19 +46,17 @@ class TaskManager:
                 if field not in task_data:
                     raise ValueError(f"Missing required field: {field}")
             
-            # 设置默认值和状态
+            # 根据新的字段结构设置任务记录
             task_record = {
+                'taskid': f"TASK{datetime.now().strftime('%Y%m%d%H%M%S')}",  # 生成任务ID
                 'title': task_data['title'],
                 'description': task_data['description'],
-                'skill_tags': task_data['skill_tags'],
+                'skilltags': task_data['skill_tags'],  # 更新字段名
                 'deadline': task_data['deadline'],
                 'status': TaskStatus.PENDING.value,
                 'urgency': task_data.get('urgency', TaskUrgency.NORMAL.value),
-                'acceptance_criteria': task_data.get('acceptance_criteria', ''),
-                'estimated_hours': task_data.get('estimated_hours', 8),
-                'reward_points': task_data.get('reward_points', 100),
-                'created_by': task_data['created_by'],
-                'created_at': datetime.now().isoformat()
+                'creator': task_data.get('created_by', task_data.get('creator', '')),
+                'create_time': datetime.now().isoformat()  # 更新字段名
             }
             
             # 创建任务记录
@@ -340,68 +338,242 @@ class TaskManager:
             logger.error(f"Error sending daily reminders: {str(e)}")
     
     async def generate_daily_report(self) -> Dict[str, Any]:
-        """生成每日报告"""
+        """生成每日报告 - 统计数据从JSON文件读取，任务信息从多维表格获取"""
         try:
-            stats = self.bitable.get_daily_task_stats()
+            import json
+            import os
+            from datetime import datetime
             
+            # 1. 首先从JSON文件读取统计数据
+            stats_file = "daily_stats.json"
+            base_stats = {}
+            
+            if os.path.exists(stats_file):
+                try:
+                    with open(stats_file, 'r', encoding='utf-8') as f:
+                        base_stats = json.load(f)
+                    logger.info(f"从JSON文件读取统计数据: {stats_file}")
+                except Exception as e:
+                    logger.error(f"读取统计JSON文件失败: {str(e)}")
+            
+            # 2. 从多维表格获取任务基本信息（用于验证和补充）
+            task_info = {}
+            try:
+                # 只获取任务表的基本信息，不进行复杂统计
+                task_stats = await self._get_simple_task_info()
+                task_info.update(task_stats)
+                logger.info(f"从多维表格获取任务信息: 共{task_info.get('total_records', 0)}条记录")
+            except Exception as e:
+                logger.error(f"从多维表格获取任务信息失败: {str(e)}")
+            
+            # 3. 合并统计数据，优先使用JSON文件数据
             report = {
-                'date': datetime.now().strftime('%Y-%m-%d'),
-                'total_tasks': stats.get('total_tasks', 0),
-                'completed_tasks': stats.get('completed_tasks', 0),
-                'pending_tasks': stats.get('pending_tasks', 0),
-                'in_progress_tasks': stats.get('in_progress_tasks', 0),
-                'average_score': stats.get('average_score', 0),
-                'completion_rate': stats.get('completion_rate', 0)
+                'date': base_stats.get('date', datetime.now().strftime('%Y-%m-%d')),
+                'total_tasks': base_stats.get('total_tasks', task_info.get('valid_records', 0)),
+                'completed_tasks': base_stats.get('completed_tasks', 0),
+                'pending_tasks': base_stats.get('pending_tasks', 0),
+                'in_progress_tasks': base_stats.get('in_progress_tasks', 0),
+                'submitted_tasks': base_stats.get('submitted_tasks', 0),
+                'reviewing_tasks': base_stats.get('reviewing_tasks', 0),
+                'rejected_tasks': base_stats.get('rejected_tasks', 0),
+                'assigned_tasks': base_stats.get('assigned_tasks', 0),
+                'cancelled_tasks': base_stats.get('cancelled_tasks', 0),
+                'average_score': base_stats.get('average_score', 0),
+                'completion_rate': base_stats.get('completion_rate', 0),
+                'tasks_by_urgency': base_stats.get('tasks_by_urgency', {
+                    'urgent': 0, 'high': 0, 'normal': 0, 'low': 0
+                }),
+                'today_created': base_stats.get('today_created', 0),
+                'today_completed': base_stats.get('today_completed', 0),
+                'top_performers': base_stats.get('top_performers', []),
+                'database_operations': {
+                    'total_records': task_info.get('total_records', 0),
+                    'valid_records': task_info.get('valid_records', 0),
+                    'empty_records': task_info.get('empty_records', 0),
+                    'last_updated': datetime.now().isoformat(),
+                    'data_source': 'JSON文件 + 多维表格验证'
+                }
             }
             
+            logger.info(f"日报生成成功: 总任务{report['total_tasks']}, 完成{report['completed_tasks']}")
             return report
             
         except Exception as e:
             logger.error(f"Error generating daily report: {str(e)}")
-            return {}
+            return {
+                'date': datetime.now().strftime('%Y-%m-%d'),
+                'total_tasks': 0, 'completed_tasks': 0, 'pending_tasks': 0,
+                'in_progress_tasks': 0, 'submitted_tasks': 0, 'reviewing_tasks': 0,
+                'rejected_tasks': 0, 'assigned_tasks': 0, 'cancelled_tasks': 0,
+                'average_score': 0, 'completion_rate': 0,
+                'tasks_by_urgency': {'urgent': 0, 'high': 0, 'normal': 0, 'low': 0},
+                'today_created': 0, 'today_completed': 0, 'top_performers': [],
+                'database_operations': {
+                    'total_records': 0, 'valid_records': 0, 'empty_records': 0,
+                    'last_updated': datetime.now().isoformat(),
+                    'error': str(e)
+                }
+            }
+    
+    async def _get_simple_task_info(self) -> Dict[str, Any]:
+        """从多维表格获取简单的任务信息"""
+        try:
+            from app.config import settings
+            
+            # 获取任务表ID
+            task_table_id = getattr(settings, 'feishu_task_table_id', None)
+            if not task_table_id:
+                logger.warning("未配置任务表ID，无法获取任务信息")
+                return {'total_records': 0, 'valid_records': 0, 'empty_records': 0}
+            
+            # 获取表格记录
+            result = self.bitable.get_table_records(task_table_id)
+            records = result.get('data', {}).get('items', [])
+            
+            # 统计基本信息
+            total_records = len(records)
+            valid_records = 0  # 有有效字段的记录
+            empty_records = 0  # 空记录
+            
+            for record in records:
+                fields = record.get('fields', {})
+                if fields and any(fields.values()):  # 有非空字段
+                    valid_records += 1
+                else:
+                    empty_records += 1
+            
+            return {
+                'total_records': total_records,
+                'valid_records': valid_records,
+                'empty_records': empty_records
+            }
+            
+        except Exception as e:
+            logger.error(f"获取任务表信息失败: {str(e)}")
+            return {'total_records': 0, 'valid_records': 0, 'empty_records': 0}
     
     async def _update_daily_stats(self):
-        """更新本地每日统计"""
+        """更新本地每日统计 - 基于实际操作增量更新"""
         try:
             import json
+            import os
             from datetime import datetime
             
-            # 生成当前统计
-            report = await self.generate_daily_report()
-            
             stats_file = "daily_stats.json"
+            today = datetime.now().strftime('%Y-%m-%d')
             
-            # 准备统计数据
-            stats = {
-                "date": report.get('date', datetime.now().strftime('%Y-%m-%d')),
-                "total_tasks": report.get('total_tasks', 0),
-                "completed_tasks": report.get('completed_tasks', 0),
-                "pending_tasks": report.get('pending_tasks', 0),
-                "in_progress_tasks": report.get('in_progress_tasks', 0),
-                "submitted_tasks": report.get('submitted_tasks', 0),
-                "rejected_tasks": report.get('rejected_tasks', 0),
-                "average_score": report.get('average_score', 0.0),
-                "completion_rate": report.get('completion_rate', 0.0),
-                "tasks_by_status": {
-                    "published": report.get('published_tasks', 0),
-                    "in_progress": report.get('in_progress_tasks', 0),
-                    "submitted": report.get('submitted_tasks', 0),
-                    "reviewing": report.get('reviewing_tasks', 0),
-                    "completed": report.get('completed_tasks', 0),
-                    "rejected": report.get('rejected_tasks', 0)
-                },
-                "top_performers": report.get('top_performers', []),
-                "last_updated": datetime.now().isoformat()
+            # 读取现有统计数据
+            if os.path.exists(stats_file):
+                try:
+                    with open(stats_file, 'r', encoding='utf-8') as f:
+                        stats = json.load(f)
+                except Exception:
+                    stats = {}
+            else:
+                stats = {}
+            
+            # 确保日期正确
+            if stats.get('date') != today:
+                # 新的一天，重置部分统计
+                stats.update({
+                    "date": today,
+                    "today_created": 0,
+                    "today_completed": 0,
+                    "last_updated": datetime.now().isoformat()
+                })
+            
+            # 从多维表格获取最新的有效记录数（用于验证）
+            task_info = await self._get_simple_task_info()
+            
+            # 更新基本统计结构
+            default_stats = {
+                "date": today,
+                "total_tasks": max(stats.get('total_tasks', 0), task_info.get('valid_records', 0)),
+                "completed_tasks": stats.get('completed_tasks', 0),
+                "pending_tasks": stats.get('pending_tasks', 0),
+                "in_progress_tasks": stats.get('in_progress_tasks', 0),
+                "submitted_tasks": stats.get('submitted_tasks', 0),
+                "reviewing_tasks": stats.get('reviewing_tasks', 0),
+                "rejected_tasks": stats.get('rejected_tasks', 0),
+                "assigned_tasks": stats.get('assigned_tasks', 0),
+                "cancelled_tasks": stats.get('cancelled_tasks', 0),
+                "average_score": stats.get('average_score', 0.0),
+                "completion_rate": stats.get('completion_rate', 0.0),
+                "tasks_by_urgency": stats.get('tasks_by_urgency', {
+                    "urgent": 0, "high": 0, "normal": 0, "low": 0
+                }),
+                "today_created": stats.get('today_created', 0),
+                "today_completed": stats.get('today_completed', 0),
+                "top_performers": stats.get('top_performers', []),
+                "last_updated": datetime.now().isoformat(),
+                "database_info": {
+                    "total_records": task_info.get('total_records', 0),
+                    "valid_records": task_info.get('valid_records', 0),
+                    "empty_records": task_info.get('empty_records', 0)
+                }
             }
+            
+            # 合并更新
+            stats.update(default_stats)
+            
+            # 重新计算完成率
+            if stats['total_tasks'] > 0:
+                stats['completion_rate'] = round(
+                    (stats['completed_tasks'] / stats['total_tasks']) * 100, 2
+                )
             
             # 写入文件
             with open(stats_file, 'w', encoding='utf-8') as f:
                 json.dump(stats, f, ensure_ascii=False, indent=2)
             
-            logger.info(f"Daily stats updated: {stats_file}")
+            logger.info(f"统计数据已更新: 总任务{stats['total_tasks']}, 有效记录{task_info.get('valid_records', 0)}")
             
         except Exception as e:
             logger.error(f"Error updating daily stats: {str(e)}")
+    
+    async def increment_task_created(self, urgency: str = 'normal'):
+        """增量更新：新任务创建"""
+        try:
+            import json
+            import os
+            from datetime import datetime
+            
+            stats_file = "daily_stats.json"
+            today = datetime.now().strftime('%Y-%m-%d')
+            
+            # 读取现有统计
+            if os.path.exists(stats_file):
+                with open(stats_file, 'r', encoding='utf-8') as f:
+                    stats = json.load(f)
+            else:
+                stats = {}
+            
+            # 更新统计
+            stats['total_tasks'] = stats.get('total_tasks', 0) + 1
+            stats['pending_tasks'] = stats.get('pending_tasks', 0) + 1
+            stats['today_created'] = stats.get('today_created', 0) + 1
+            stats['last_updated'] = datetime.now().isoformat()
+            stats['date'] = today
+            
+            # 更新紧急程度统计
+            urgency_stats = stats.get('tasks_by_urgency', {})
+            urgency_stats[urgency.lower()] = urgency_stats.get(urgency.lower(), 0) + 1
+            stats['tasks_by_urgency'] = urgency_stats
+            
+            # 重新计算完成率
+            if stats['total_tasks'] > 0:
+                stats['completion_rate'] = round(
+                    (stats.get('completed_tasks', 0) / stats['total_tasks']) * 100, 2
+                )
+            
+            # 写入文件
+            with open(stats_file, 'w', encoding='utf-8') as f:
+                json.dump(stats, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"新任务统计已更新: 总任务{stats['total_tasks']}, 今日新增{stats['today_created']}")
+            
+        except Exception as e:
+            logger.error(f"增量更新任务统计失败: {str(e)}")
     
     async def complete_task(self, task_id: str, review_data: Dict[str, Any]) -> bool:
         """完成任务（公共接口）"""

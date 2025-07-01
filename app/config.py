@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     feishu_app_secret: str
     feishu_verify_token: str
     feishu_encrypt_key: Optional[str] = None
+    feishu_bot_user_id: Optional[str] = None  # 机器人的用户ID（可选，用于群聊邀请）
     
     # LLM 模型配置
     deepseek_key: Optional[str] = None
