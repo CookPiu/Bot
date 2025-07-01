@@ -1,0 +1,412 @@
+name: CI Pipeline
+
+# 触发条件
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # 手动触发
+
+# 环境变量
+env:
+  PYTHON_VERSION: '3.11'
+  
+# 作业定义
+jobs:
+  # 作业1: 代码质量检查
+  quality-check:
+    name: Code Quality Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout代码
+      uses: actions/checkout@v4
+      
+    - name: 设置Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+        
+    - name: 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install flake8 black isort mypy pytest-cov
+        
+    - name: 代码格式检查
+      run: |
+        # 检查代码格式
+        black --check --diff .
+        
+    - name: 导入排序检查
+      run: |
+        isort --check-only --diff .
+        
+    - name: 代码规范检查
+      run: |
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        
+    - name: 类型检查
+      run: |
+        mypy app/ --ignore-missing-imports --no-strict-optional
+      continue-on-error: true  # 类型检查不强制要求通过
+
+  # 作业2: 单元测试
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: quality-check
+    
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11']
+        
+    steps:
+    - name: Checkout代码
+      uses: actions/checkout@v4
+    
+    - name: 设置Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+        
+    - name: 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov pytest-asyncio pytest-mock
+        
+    - name: 运行测试
+      run: |
+        # 运行测试并生成覆盖率报告
+        python -m pytest tests/ -v --cov=app --cov-report=xml --cov-report=html --cov-report=term
+      env:
+        # 测试环境变量
+        FEISHU_APP_ID: test_app_id
+        FEISHU_APP_SECRET: test_app_secret
+        DEEPSEEK_KEY: test_deepseek_key
+        
+    - name: 上传覆盖率报告
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        fail_ci_if_error: false
+        
+    - name: 保存测试结果
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-py${{ matrix.python-version }}
+        path: |
+          htmlcov/
+          coverage.xml
+          pytest-report.xml
+
+  # 作业3: 集成测试
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    
+    services:
+      # Redis服务 (如果需要)
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    
+    steps:
+    - name: Checkout代码
+      uses: actions/checkout@v4
+    
+    - name: 设置Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+        
+    - name: 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-asyncio
+        
+    - name: 启动FastAPI服务
+      run: |
+        # 后台启动服务用于集成测试
+        python -m uvicorn main:app --host 0.0.0.0 --port 8000 &
+        sleep 10  # 等待服务启动
+      env:
+        FEISHU_APP_ID: test_app_id
+        FEISHU_APP_SECRET: test_app_secret
+        
+    - name: 健康检查
+      run: |
+        curl -f http://localhost:8000/health || exit 1
+        curl -f http://localhost:8000/api/v1/health || exit 1
+        
+    - name: 运行集成测试
+      run: |
+        python -m pytest tests/integration/ -v
+      env:
+        TEST_SERVER_URL: http://localhost:8000
+
+  # 作业4: 安全扫描
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - name: Checkout代码
+      uses: actions/checkout@v4
+    
+    - name: 设置Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: 安装依赖扫描工具
+      run: |
+        python -m pip install --upgrade pip
+        pip install safety bandit
+        
+    - name: 检查依赖安全性
+      run: |
+        safety check -r requirements.txt
+      continue-on-error: true
+        
+    - name: 代码安全扫描
+      run: |
+        bandit -r app/ -f json -o bandit-report.json
+      continue-on-error: true
+        
+    - name: 上传安全扫描报告
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          bandit-report.json
+
+  # 作业5: Docker构建测试
+  docker-build:
+    name: Docker Build Test
+    runs-on: ubuntu-latest
+    needs: [quality-check, unit-tests]
+    
+    steps:
+    - name: Checkout代码
+      uses: actions/checkout@v4
+    
+    - name: 设置Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: 构建Docker镜像
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: false
+        tags: task-bot:test
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: 测试Docker镜像
+      run: |
+        # 运行容器并测试
+        docker run -d --name test-container -p 8000:8000 task-bot:test
+        sleep 15
+        curl -f http://localhost:8000/health || exit 1
+        docker stop test-container
+
+  # 作业6: 提取任务ID并通知任务系统
+  notify-task-system:
+    name: Notify Task System
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, docker-build]
+    if: always() && (contains(github.event.head_commit.message, 'TASK') || contains(github.event.pull_request.title, 'TASK'))
+    
+    steps:
+    - name: 提取任务ID
+      id: extract-task
+      run: |
+        # 从commit消息或PR标题中提取任务ID
+        COMMIT_MSG="${{ github.event.head_commit.message || github.event.pull_request.title }}"
+        TASK_ID=$(echo "$COMMIT_MSG" | grep -oP 'TASK\d+' | head -1)
+        
+        if [ -n "$TASK_ID" ]; then
+          echo "task_id=$TASK_ID" >> $GITHUB_OUTPUT
+          echo "找到任务ID: $TASK_ID"
+        else
+          echo "未找到任务ID"
+        fi
+        
+    - name: 计算CI结果
+      id: ci-result
+      run: |
+        # 计算整体CI状态
+        QUALITY_STATUS="${{ needs.quality-check.result }}"
+        UNIT_TEST_STATUS="${{ needs.unit-tests.result }}"
+        INTEGRATION_STATUS="${{ needs.integration-tests.result }}"
+        DOCKER_STATUS="${{ needs.docker-build.result }}"
+        
+        # 判断整体是否通过
+        if [[ "$QUALITY_STATUS" == "success" && "$UNIT_TEST_STATUS" == "success" && "$INTEGRATION_STATUS" == "success" && "$DOCKER_STATUS" == "success" ]]; then
+          echo "overall_status=success" >> $GITHUB_OUTPUT
+          echo "ci_passed=true" >> $GITHUB_OUTPUT
+        else
+          echo "overall_status=failure" >> $GITHUB_OUTPUT  
+          echo "ci_passed=false" >> $GITHUB_OUTPUT
+        fi
+        
+        echo "quality_passed=$([[ \"$QUALITY_STATUS\" == \"success\" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+        echo "tests_passed=$([[ \"$UNIT_TEST_STATUS\" == \"success\" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+        echo "integration_passed=$([[ \"$INTEGRATION_STATUS\" == \"success\" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+        echo "build_passed=$([[ \"$DOCKER_STATUS\" == \"success\" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+        
+    - name: 发送CI结果到任务系统
+      if: steps.extract-task.outputs.task_id != ''
+      run: |
+        # 构建webhook payload
+        PAYLOAD=$(cat <<EOF
+        {
+          "action": "completed",
+          "workflow_run": {
+            "id": "${{ github.run_id }}",
+            "name": "${{ github.workflow }}",
+            "status": "completed",
+            "conclusion": "${{ steps.ci-result.outputs.overall_status }}",
+            "head_sha": "${{ github.sha }}",
+            "html_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          },
+          "repository": {
+            "name": "${{ github.event.repository.name }}",
+            "full_name": "${{ github.repository }}"
+          },
+          "check_run": {
+            "name": "CI Pipeline",
+            "status": "completed", 
+            "conclusion": "${{ steps.ci-result.outputs.overall_status }}",
+            "head_sha": "${{ github.sha }}",
+            "output": {
+              "title": "CI Pipeline Results",
+              "summary": "GitHub Actions CI Pipeline completed",
+              "text": "Quality Check: ${{ needs.quality-check.result }}\nUnit Tests: ${{ needs.unit-tests.result }}\nIntegration Tests: ${{ needs.integration-tests.result }}\nDocker Build: ${{ needs.docker-build.result }}"
+            }
+          },
+          "task_metadata": {
+            "task_id": "${{ steps.extract-task.outputs.task_id }}",
+            "ci_passed": ${{ steps.ci-result.outputs.ci_passed }},
+            "quality_passed": ${{ steps.ci-result.outputs.quality_passed }},
+            "tests_passed": ${{ steps.ci-result.outputs.tests_passed }},
+            "integration_passed": ${{ steps.ci-result.outputs.integration_passed }},
+            "build_passed": ${{ steps.ci-result.outputs.build_passed }},
+            "coverage_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "commit_message": "${{ github.event.head_commit.message || github.event.pull_request.title }}",
+            "branch": "${{ github.ref_name }}",
+            "pr_url": "${{ github.event.pull_request.html_url || '' }}"
+          }
+        }
+        EOF
+        )
+        
+        # 发送到任务系统webhook
+        if [ -n "${{ secrets.TASK_WEBHOOK_URL }}" ]; then
+          echo "发送CI结果到任务系统..."
+          
+          # 计算签名 (如果设置了密钥)
+          if [ -n "${{ secrets.GITHUB_WEBHOOK_SECRET }}" ]; then
+            SIGNATURE="sha256=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "${{ secrets.GITHUB_WEBHOOK_SECRET }}" -binary | base64)"
+            curl -X POST "${{ secrets.TASK_WEBHOOK_URL }}" \
+              -H "Content-Type: application/json" \
+              -H "X-GitHub-Event: workflow_run" \
+              -H "X-Hub-Signature-256: $SIGNATURE" \
+              -H "X-GitHub-Delivery: ${{ github.run_id }}" \
+              -d "$PAYLOAD" \
+              --fail-with-body
+          else
+            curl -X POST "${{ secrets.TASK_WEBHOOK_URL }}" \
+              -H "Content-Type: application/json" \
+              -H "X-GitHub-Event: workflow_run" \
+              -H "X-GitHub-Delivery: ${{ github.run_id }}" \
+              -d "$PAYLOAD" \
+              --fail-with-body
+          fi
+          
+          echo "CI结果已发送到任务系统"
+        else
+          echo "未配置TASK_WEBHOOK_URL，跳过通知"
+        fi
+
+  # 作业7: 生成测试报告
+  generate-report:
+    name: Generate Test Report
+    runs-on: ubuntu-latest
+    needs: [quality-check, unit-tests, integration-tests, security-scan, docker-build]
+    if: always()
+    
+    steps:
+    - name: Checkout代码
+      uses: actions/checkout@v4
+      
+    - name: 下载所有测试结果
+      uses: actions/download-artifact@v3
+      
+    - name: 生成综合测试报告
+      run: |
+        # 创建测试报告目录
+        mkdir -p test-reports
+        
+        # 生成Markdown测试报告
+        cat > test-reports/ci-report.md << 'EOF'
+        # 🔍 CI Pipeline 测试报告
+        
+        ## 📊 总览
+        
+        - **工作流ID**: ${{ github.run_id }}
+        - **提交SHA**: ${{ github.sha }}
+        - **分支**: ${{ github.ref_name }}
+        - **触发事件**: ${{ github.event_name }}
+        - **执行时间**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        
+        ## ✅ 检查结果
+        
+        | 检查项目 | 状态 | 结果 |
+        |---------|------|------|
+        | 代码质量检查 | ${{ needs.quality-check.result }} | ${{ needs.quality-check.result == 'success' && '✅ 通过' || '❌ 失败' }} |
+        | 单元测试 | ${{ needs.unit-tests.result }} | ${{ needs.unit-tests.result == 'success' && '✅ 通过' || '❌ 失败' }} |
+        | 集成测试 | ${{ needs.integration-tests.result }} | ${{ needs.integration-tests.result == 'success' && '✅ 通过' || '❌ 失败' }} |
+        | 安全扫描 | ${{ needs.security-scan.result }} | ${{ needs.security-scan.result == 'success' && '✅ 通过' || needs.security-scan.result == 'skipped' && '⏭️ 跳过' || '❌ 失败' }} |
+        | Docker构建 | ${{ needs.docker-build.result }} | ${{ needs.docker-build.result == 'success' && '✅ 通过' || '❌ 失败' }} |
+        
+        ## 🔗 相关链接
+        
+        - [查看详细日志](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+        - [代码覆盖率报告](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+        
+        ## 📝 提交信息
+        
+        ```
+        ${{ github.event.head_commit.message || github.event.pull_request.title }}
+        ```
+        
+        ---
+        
+        报告生成时间: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        EOF
+        
+    - name: 上传测试报告
+      uses: actions/upload-artifact@v3
+      with:
+        name: ci-test-report
+        path: test-reports/
+        retention-days: 30 
